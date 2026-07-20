@@ -214,8 +214,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       (t('fixedExpenses'), r.fixedExpenses,
           AppColors.bad.withOpacity(.65)),
     ];
-    final maxVal =
-        items.fold<double>(0, (m, e) => e.$2 > m ? e.$2 : m).clamp(1, double.infinity);
+    final rawMax = items.fold<double>(0, (m, e) => e.$2 > m ? e.$2 : m);
+    final maxVal = rawMax < 1 ? 1.0 : rawMax;
 
     return Card(
       child: Padding(
@@ -262,7 +262,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Widget _breakdownRow(
       BuildContext context, String label, double value, Color color, double maxVal) {
-    final ratio = (value / maxVal).clamp(0.0, 1.0);
+    final ratioRaw = maxVal == 0 ? 0.0 : value / maxVal;
+    final double ratio = ratioRaw < 0 ? 0.0 : (ratioRaw > 1 ? 1.0 : ratioRaw);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -286,7 +287,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
-            value: ratio == 0 ? 0 : ratio,
+            value: ratio,
             minHeight: 6,
             backgroundColor: color.withOpacity(.12),
             valueColor: AlwaysStoppedAnimation(color),

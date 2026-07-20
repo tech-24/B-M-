@@ -207,7 +207,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                 child: Text(t('cancel'))),
             FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text(t('costSettings'))),
+                child: Text(t('operatingCost'))),
           ],
         ),
       );
@@ -215,7 +215,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         await Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (_) => CostSettingsScreen(project: widget.project)));
+                builder: (_) => CostItemsPage(project: widget.project)));
         _load();
       }
       return;
@@ -352,11 +352,44 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     }
   }
 
+  Future<void> _deleteDay() async {
+    final t = L10n.of(context).t;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('deleteDay')),
+        content: Text(t('deleteDayConfirm')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t('cancel'))),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.bad),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t('delete'))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _db.deleteDay(widget.project.id!, widget.date);
+    if (!mounted) return;
+    Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = L10n.of(context).t;
     return Scaffold(
-      appBar: AppBar(title: Text(dateLabel(context, widget.date))),
+      appBar: AppBar(
+        title: Text(dateLabel(context, widget.date)),
+        actions: [
+          IconButton(
+            tooltip: t('deleteDay'),
+            icon: const Icon(Icons.delete_outline),
+            onPressed: _loading ? null : _deleteDay,
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(

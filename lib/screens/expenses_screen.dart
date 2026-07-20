@@ -6,8 +6,10 @@ import '../core/localization.dart';
 import '../data/db.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import 'cost_settings_screen.dart';
 
-/// Two tabs: variable daily expenses + fixed monthly expenses.
+/// Three tabs: variable daily expenses, fixed monthly expenses, and
+/// operating cost items (per-item monthly unit cost).
 class ExpensesScreen extends StatefulWidget {
   final Project project;
   const ExpensesScreen({super.key, required this.project});
@@ -18,7 +20,8 @@ class ExpensesScreen extends StatefulWidget {
 
 class _ExpensesScreenState extends State<ExpensesScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 2, vsync: this);
+  late final TabController _tab = TabController(length: 3, vsync: this);
+  final _costItemsKey = GlobalKey<CostItemsTabState>();
   final _db = AppDatabase.instance;
 
   String _month = currentMonthStr();
@@ -203,17 +206,29 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         bottom: TabBar(controller: _tab, tabs: [
           Tab(text: t('daily')),
           Tab(text: t('fixed')),
+          Tab(text: t('operatingCost')),
         ]),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : TabBarView(
               controller: _tab,
-              children: [_dailyTab(), _fixedTab()],
+              children: [
+                _dailyTab(),
+                _fixedTab(),
+                CostItemsTab(key: _costItemsKey, project: widget.project),
+              ],
             ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () =>
-            _tab.index == 0 ? _editDaily() : _editFixed(),
+        onPressed: () {
+          if (_tab.index == 0) {
+            _editDaily();
+          } else if (_tab.index == 1) {
+            _editFixed();
+          } else {
+            _costItemsKey.currentState?.addItem();
+          }
+        },
         child: const Icon(Icons.add),
       ),
     );

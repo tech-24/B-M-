@@ -25,7 +25,6 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.24.0"
           channel: "stable"
 
       # This repo has no web/index.html yet. If it's missing, scaffold the
@@ -38,6 +37,18 @@ jobs:
           fi
 
       - run: flutter pub get
+
+      # Overwrite Flutter's default web icons with our own branding — runs
+      # every time (not just on first scaffold) so it survives even though
+      # web/ itself isn't committed to the repo.
+      - name: Apply custom branding icons
+        run: |
+          mkdir -p web/icons
+          cp branding/web_icons/favicon.png web/favicon.png
+          cp branding/web_icons/Icon-192.png web/icons/Icon-192.png
+          cp branding/web_icons/Icon-512.png web/icons/Icon-512.png
+          cp branding/web_icons/Icon-maskable-192.png web/icons/Icon-maskable-192.png
+          cp branding/web_icons/Icon-maskable-512.png web/icons/Icon-maskable-512.png
 
       # --base-href must match the repo name so assets load correctly on
       # https://<username>.github.io/<repo-name>/ — filled in automatically

@@ -211,6 +211,26 @@ class AppDatabase {
   Future<void> deleteDailyRecord(int id) async =>
       _c.from('daily_records').delete().eq('id', id);
 
+  /// Deletes EVERYTHING recorded for one day: the sales record, all cost
+  /// item usage, and all daily expenses logged on that date. Irreversible.
+  Future<void> deleteDay(int projectId, String date) async {
+    await _c
+        .from('cost_usage')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('date', date);
+    await _c
+        .from('daily_expenses')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('date', date);
+    await _c
+        .from('daily_records')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('date', date);
+  }
+
   // ---------------- Daily expenses ----------------
 
   Future<List<DailyExpense>> getDailyExpenses(int projectId,

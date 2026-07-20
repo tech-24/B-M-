@@ -5,7 +5,6 @@ import '../core/localization.dart';
 import '../data/db.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
-import 'cost_settings_screen.dart';
 import 'daily_records_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -58,20 +57,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.project.name),
-        actions: [
-          IconButton(
-            tooltip: t('costSettings'),
-            icon: const Icon(Icons.price_change_outlined),
-            onPressed: () async {
-              await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) =>
-                          CostSettingsScreen(project: widget.project)));
-              _load();
-            },
-          ),
-        ],
       ),
       body: _loading || r == null
           ? const Center(child: CircularProgressIndicator())

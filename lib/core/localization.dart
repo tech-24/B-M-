@@ -48,7 +48,7 @@ class L10n {
     'addExpense': {'ar': 'إضافة مصروف', 'en': 'Add expense'},
     'addInventoryItem': {'ar': 'إضافة صنف', 'en': 'Add item'},
     'viewReports': {'ar': 'عرض التقارير', 'en': 'View reports'},
-    'costSettings': {'ar': 'إعدادات التكلفة', 'en': 'Cost Settings'},
+    'operatingCost': {'ar': 'تكلفة التشغيل', 'en': 'Operating Cost'},
     'costHistory': {'ar': 'سجل التكاليف الشهرية', 'en': 'Monthly cost history'},
     'costPerUnit': {'ar': 'تكلفة الوحدة', 'en': 'Cost per unit'},
     'addCostItem': {'ar': 'إضافة صنف تكلفة', 'en': 'Add cost item'},
@@ -153,6 +153,11 @@ class L10n {
       'en': 'Set the unit cost for each month; it is applied automatically to daily usage cost.'
     },
     'openDay': {'ar': 'فتح اليوم', 'en': 'Open day'},
+    'deleteDay': {'ar': 'حذف اليوم', 'en': 'Delete day'},
+    'deleteDayConfirm': {
+      'ar': 'سيتم حذف كل بيانات هذا اليوم نهائياً (المبيعات، الاستهلاك، والمصاريف). لا يمكن التراجع عن هذا الإجراء. متابعة؟',
+      'en': 'All data for this day (sales, usage, and expenses) will be permanently deleted. This cannot be undone. Continue?'
+    },
     'today': {'ar': 'اليوم', 'en': 'Today'},
     'backupTitle': {'ar': 'النسخ الاحتياطي على Google Drive', 'en': 'Google Drive backup'},
     'backupSubtitle': {

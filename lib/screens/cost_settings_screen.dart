@@ -9,15 +9,19 @@ import '../widgets/common.dart';
 
 /// List of cost items (e.g. "Vanilla ice cream", "Gasoline"). Each item is
 /// opened to manage its own monthly unit-cost history.
-class CostSettingsScreen extends StatefulWidget {
+///
+/// This is a plain content widget (no Scaffold/AppBar/FAB) so it can be
+/// embedded as a tab inside ExpensesScreen. [addItemKey] lets the parent
+/// trigger "add item" from its own shared FloatingActionButton.
+class CostItemsTab extends StatefulWidget {
   final Project project;
-  const CostSettingsScreen({super.key, required this.project});
+  const CostItemsTab({super.key, required this.project});
 
   @override
-  State<CostSettingsScreen> createState() => _CostSettingsScreenState();
+  State<CostItemsTab> createState() => CostItemsTabState();
 }
 
-class _CostSettingsScreenState extends State<CostSettingsScreen> {
+class CostItemsTabState extends State<CostItemsTab> {
   final _db = AppDatabase.instance;
   List<CostItem> _items = [];
   Map<int, CostEntry?> _latest = {};
@@ -43,6 +47,9 @@ class _CostSettingsScreenState extends State<CostSettingsScreen> {
       _loading = false;
     });
   }
+
+  /// Public so the parent screen's shared FAB can trigger "add item".
+  Future<void> addItem() => _addOrEditItem();
 
   Future<void> _addOrEditItem({CostItem? existing}) async {
     final t = L10n.of(context).t;
@@ -115,68 +122,76 @@ class _CostSettingsScreenState extends State<CostSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final t = L10n.of(context).t;
-    return Scaffold(
-      appBar: AppBar(title: Text(t('costSettings'))),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Text(t('costItemsHint'),
-                        style:
-                            TextStyle(color: Theme.of(context).hintColor)),
-                  ),
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Text(t('costItemsHint'),
+                style: TextStyle(color: Theme.of(context).hintColor)),
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_items.isEmpty)
+          EmptyState(
+              icon: Icons.price_change_outlined, message: t('noCostItems'))
+        else
+          ..._items.map((it) {
+            final latest = _latest[it.id];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const Icon(Icons.local_drink_outlined),
+                title: Text(it.name),
+                subtitle: Text(latest == null
+                    ? t('noCostSet')
+                    : '${t('currentCost')}: ${fmtMoney(context, latest.cost)} '
+                        '(${monthLabel(context, latest.month)})'),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'edit') _addOrEditItem(existing: it);
+                    if (v == 'delete') _deleteItem(it);
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'edit', child: Text(t('edit'))),
+                    PopupMenuItem(value: 'delete', child: Text(t('delete'))),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                if (_items.isEmpty)
-                  EmptyState(
-                      icon: Icons.price_change_outlined,
-                      message: t('noCostItems'))
-                else
-                  ..._items.map((it) {
-                    final latest = _latest[it.id];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        leading:
-                            const Icon(Icons.local_drink_outlined),
-                        title: Text(it.name),
-                        subtitle: Text(latest == null
-                            ? t('noCostSet')
-                            : '${t('currentCost')}: ${fmtMoney(context, latest.cost)} '
-                                '(${monthLabel(context, latest.month)})'),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (v) {
-                            if (v == 'edit') _addOrEditItem(existing: it);
-                            if (v == 'delete') _deleteItem(it);
-                          },
-                          itemBuilder: (_) => [
-                            PopupMenuItem(
-                                value: 'edit', child: Text(t('edit'))),
-                            PopupMenuItem(
-                                value: 'delete', child: Text(t('delete'))),
-                          ],
-                        ),
-                        onTap: () async {
-                          await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => CostItemHistoryScreen(
-                                      project: widget.project, item: it)));
-                          _load();
-                        },
-                      ),
-                    );
-                  }),
-              ],
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addOrEditItem(),
-        icon: const Icon(Icons.add),
-        label: Text(t('addCostItem')),
+                onTap: () async {
+                  await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => CostItemHistoryScreen(
+                              project: widget.project, item: it)));
+                  _load();
+                },
+              ),
+            );
+          }),
+      ],
+    );
+  }
+}
+
+/// Standalone page wrapper around [CostItemsTab] (with its own AppBar and
+/// "add" FAB) — used when linking here directly rather than through the
+/// Expenses tab (e.g. from the "no items yet" prompt in Daily Records).
+class CostItemsPage extends StatelessWidget {
+  final Project project;
+  const CostItemsPage({super.key, required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = L10n.of(context).t;
+    final key = GlobalKey<CostItemsTabState>();
+    return Scaffold(
+      appBar: AppBar(title: Text(t('operatingCost'))),
+      body: CostItemsTab(key: key, project: project),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => key.currentState?.addItem(),
+        child: const Icon(Icons.add),
       ),
     );
   }

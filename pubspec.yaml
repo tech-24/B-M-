@@ -1,0 +1,24 @@
+name: business_dashboard
+description: Web dashboard for Business Manager — cloud-synced via Supabase, no app install needed.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  provider: ^6.1.2
+  intl: any
+  shared_preferences: ^2.2.3
+  fl_chart: ^0.69.0
+  supabase_flutter: ^2.8.0
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

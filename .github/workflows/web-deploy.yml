@@ -1,0 +1,64 @@
+name: Deploy web dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.0"
+          channel: "stable"
+
+      # This repo has no web/index.html yet. If it's missing, scaffold the
+      # web/ folder with Flutter's own tooling — exactly what running
+      # `flutter create . --platforms=web` locally would do.
+      - name: Add web platform folder if missing
+        run: |
+          if [ ! -f "web/index.html" ]; then
+            flutter create . --platforms=web --org com.businessmanager --project-name business_dashboard
+          fi
+
+      - run: flutter pub get
+
+      # --base-href must match the repo name so assets load correctly on
+      # https://<username>.github.io/<repo-name>/ — filled in automatically
+      # from the repository name, whatever you end up calling it.
+      - name: Build web release
+        run: flutter build web --release --base-href /${{ github.event.repository.name }}/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+# ---------------------------------------------------------------------
+# One-time setup after your first push:
+#   Repo -> Settings -> Pages -> "Build and deployment" -> Source:
+#   select "GitHub Actions".
+# After that, every push to `main` re-builds and re-publishes the
+# dashboard automatically at:
+#   https://<your-username>.github.io/<this-repo-name>/
+# ---------------------------------------------------------------------

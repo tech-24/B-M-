@@ -470,25 +470,31 @@ class AppDatabase {
   }
 
   Future<MonthlyReport> monthlyReport(int projectId, String month) async {
+    final results = await Future.wait([
+      salesForMonth(projectId, month),
+      productCostForMonth(projectId, month),
+      dailyExpensesForMonth(projectId, month),
+      inventoryConsumptionForMonth(projectId, month),
+      fixedExpensesForMonth(projectId, month),
+    ]);
     return MonthlyReport(
       month: month,
-      totalSales: await salesForMonth(projectId, month),
-      productCost: await productCostForMonth(projectId, month),
-      dailyExpenses: await dailyExpensesForMonth(projectId, month),
-      inventoryConsumption:
-          await inventoryConsumptionForMonth(projectId, month),
-      fixedExpenses: await fixedExpensesForMonth(projectId, month),
+      totalSales: results[0],
+      productCost: results[1],
+      dailyExpenses: results[2],
+      inventoryConsumption: results[3],
+      fixedExpenses: results[4],
     );
   }
 
-  /// Reports for the 12 months of [year] (e.g. 2026).
+  /// Reports for the 12 months of [year] (e.g. 2026). All 12 months are
+  /// fetched in parallel instead of one-by-one to keep this fast.
   Future<List<MonthlyReport>> yearlyReports(int projectId, int year) async {
-    final out = <MonthlyReport>[];
-    for (var m = 1; m <= 12; m++) {
-      final month = '$year-${m.toString().padLeft(2, '0')}';
-      out.add(await monthlyReport(projectId, month));
-    }
-    return out;
+    final months = [
+      for (var m = 1; m <= 12; m++) '$year-${m.toString().padLeft(2, '0')}'
+    ];
+    return Future.wait(
+        months.map((month) => monthlyReport(projectId, month)));
   }
 
   // ---------------- Custom date-range report (printable summary) ----------------
@@ -585,29 +591,31 @@ class AppDatabase {
   }
 
   /// Fixed expenses across a range = sum of each month's applicable fixed
-  /// expenses for every month the range touches.
+  /// expenses for every month the range touches (fetched in parallel).
   Future<double> fixedExpensesForRange(
       int projectId, String startDate, String endDate) async {
-    double total = 0;
-    for (final month in _monthsBetween(startDate, endDate)) {
-      total += await fixedExpensesForMonth(projectId, month);
-    }
-    return total;
+    final totals = await Future.wait(_monthsBetween(startDate, endDate)
+        .map((month) => fixedExpensesForMonth(projectId, month)));
+    return totals.fold<double>(0.0, (s, v) => s + v);
   }
 
   Future<PeriodReport> rangeReport(
       int projectId, String startDate, String endDate) async {
+    final results = await Future.wait([
+      salesForRange(projectId, startDate, endDate),
+      productCostForRange(projectId, startDate, endDate),
+      dailyExpensesForRange(projectId, startDate, endDate),
+      inventoryConsumptionForRange(projectId, startDate, endDate),
+      fixedExpensesForRange(projectId, startDate, endDate),
+    ]);
     return PeriodReport(
       startDate: startDate,
       endDate: endDate,
-      totalSales: await salesForRange(projectId, startDate, endDate),
-      productCost: await productCostForRange(projectId, startDate, endDate),
-      dailyExpenses:
-          await dailyExpensesForRange(projectId, startDate, endDate),
-      inventoryConsumption:
-          await inventoryConsumptionForRange(projectId, startDate, endDate),
-      fixedExpenses:
-          await fixedExpensesForRange(projectId, startDate, endDate),
+      totalSales: results[0],
+      productCost: results[1],
+      dailyExpenses: results[2],
+      inventoryConsumption: results[3],
+      fixedExpenses: results[4],
     );
   }
 }

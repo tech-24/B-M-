@@ -36,11 +36,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final month = currentMonthStr();
     _summaries.clear();
     _lastRecord.clear();
-    for (final p in projects) {
-      _summaries[p.id!] = await _db.monthlyReport(p.id!, month);
-      final recent = await _db.getDailyRecords(p.id!, limit: 1);
+    await Future.wait(projects.map((p) async {
+      final results = await Future.wait([
+        _db.monthlyReport(p.id!, month),
+        _db.getDailyRecords(p.id!, limit: 1),
+      ]);
+      _summaries[p.id!] = results[0] as MonthlyReport;
+      final recent = results[1] as List<DailyRecord>;
       _lastRecord[p.id!] = recent.isEmpty ? null : recent.first;
-    }
+    }));
     if (!mounted) return;
     setState(() {
       _projects = projects;

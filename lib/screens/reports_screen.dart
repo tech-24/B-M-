@@ -155,6 +155,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       ),
     );
 
+    Uint8List? bytes;
     try {
       final report = await _db.rangeReport(widget.project.id!, start, end);
 
@@ -175,7 +176,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final generatedOn =
           '${t('generatedOn')}: ${DateFormat.yMMMd(lang).add_jm().format(DateTime.now())}';
 
-      final bytes = await buildPeriodReportPdf(
+      bytes = await buildPeriodReportPdf(
         projectName: widget.project.name,
         periodLabel: periodLabel,
         generatedOnLabel: generatedOn,
@@ -193,17 +194,31 @@ class _ReportsScreenState extends State<ReportsScreen> {
         },
         logoBytes: logoBytes,
       );
+    } catch (e) {
+      // Close the "preparing" dialog exactly once, then stop — do NOT fall
+      // through to printing, and never pop again below.
+      if (mounted) Navigator.pop(context);
+      messenger.showSnackBar(SnackBar(
+          content: Text('${t('preparingReport')}: $e'),
+          duration: const Duration(seconds: 6)));
+      return;
+    }
 
-      if (!mounted) return;
-      Navigator.pop(context); // close loading dialog
+    // PDF built successfully — close the "preparing" dialog once.
+    if (mounted) Navigator.pop(context);
 
+    // Printing is a separate step: if the print/save dialog itself fails
+    // (e.g. blocked by the browser), just show an error — never touch
+    // Navigator again here, so the report screen is never accidentally
+    // closed.
+    try {
       await Printing.layoutPdf(
         name: '${widget.project.name}_${start}_$end.pdf',
-        onLayout: (_) async => bytes,
+        onLayout: (_) async => bytes!,
       );
     } catch (e) {
-      if (mounted) Navigator.pop(context); // close loading dialog
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(
+          content: Text('$e'), duration: const Duration(seconds: 6)));
     }
   }
 

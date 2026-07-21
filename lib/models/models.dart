@@ -6,15 +6,22 @@ class Project {
   final int? id;
   final String name;
   final String description;
+  final String? logoUrl;
   final String createdAt; // ISO date
 
-  Project({this.id, required this.name, this.description = '', String? createdAt})
-      : createdAt = createdAt ?? DateTime.now().toIso8601String();
+  Project({
+    this.id,
+    required this.name,
+    this.description = '',
+    this.logoUrl,
+    String? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
 
   Map<String, dynamic> toMap() => {
         'id': id,
         'name': name,
         'description': description,
+        'logo_url': logoUrl,
         'created_at': createdAt,
       };
 
@@ -22,13 +29,26 @@ class Project {
         id: m['id'] as int?,
         name: m['name'] as String,
         description: (m['description'] ?? '') as String,
+        logoUrl: m['logo_url'] as String?,
         createdAt: m['created_at'] as String?,
       );
 
-  Project copyWith({String? name, String? description}) => Project(
+  Project copyWith({String? name, String? description, String? logoUrl}) =>
+      Project(
         id: id,
         name: name ?? this.name,
         description: description ?? this.description,
+        logoUrl: logoUrl ?? this.logoUrl,
+        createdAt: createdAt,
+      );
+
+  /// Explicitly clears the logo (copyWith can't distinguish "unset" from
+  /// "keep current value" since both look like null).
+  Project withoutLogo() => Project(
+        id: id,
+        name: name,
+        description: description,
+        logoUrl: null,
         createdAt: createdAt,
       );
 }
@@ -313,6 +333,34 @@ class MonthlyReport {
 
   MonthlyReport({
     required this.month,
+    required this.totalSales,
+    required this.productCost,
+    required this.dailyExpenses,
+    required this.inventoryConsumption,
+    required this.fixedExpenses,
+  });
+
+  double get totalCosts => productCost + inventoryConsumption;
+  double get totalExpenses => dailyExpenses + fixedExpenses;
+  double get netProfit =>
+      totalSales - productCost - dailyExpenses - inventoryConsumption - fixedExpenses;
+  double get profitPercent => totalSales <= 0 ? 0 : (netProfit / totalSales) * 100;
+}
+
+/// Aggregated report for an arbitrary custom date range (used by the
+/// printable summary feature: month / 3 / 6 / 9 months / year / custom).
+class PeriodReport {
+  final String startDate; // yyyy-MM-dd
+  final String endDate; // yyyy-MM-dd
+  final double totalSales;
+  final double productCost;
+  final double dailyExpenses;
+  final double inventoryConsumption;
+  final double fixedExpenses;
+
+  PeriodReport({
+    required this.startDate,
+    required this.endDate,
     required this.totalSales,
     required this.productCost,
     required this.dailyExpenses,

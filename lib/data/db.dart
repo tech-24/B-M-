@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/models.dart';
@@ -29,14 +31,43 @@ class AppDatabase {
   }
 
   Future<void> updateProject(Project pr) async {
-    await _c
-        .from('projects')
-        .update({'name': pr.name, 'description': pr.description})
-        .eq('id', pr.id as Object);
+    await _c.from('projects').update({
+      'name': pr.name,
+      'description': pr.description,
+      'logo_url': pr.logoUrl,
+    }).eq('id', pr.id as Object);
   }
 
   Future<void> deleteProject(int id) async =>
       _c.from('projects').delete().eq('id', id);
+
+  // ---------------- Project logo ----------------
+
+  /// Uploads [bytes] as the project's logo to Supabase Storage (bucket
+  /// `project-logos`, path `{user_id}/{project_id}.{ext}`), saves the public
+  /// URL on the project row, and returns that URL.
+  Future<String> uploadProjectLogo(
+      int projectId, Uint8List bytes, String fileExt) async {
+    final uid = _c.auth.currentUser!.id;
+    final path = '$uid/$projectId.$fileExt';
+    await _c.storage.from('project-logos').uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(
+            upsert: true,
+            contentType: 'image/${fileExt == 'jpg' ? 'jpeg' : fileExt}',
+          ),
+        );
+    // Cache-bust so the new logo shows immediately even with the same path.
+    final url =
+        '${_c.storage.from('project-logos').getPublicUrl(path)}?t=${DateTime.now().millisecondsSinceEpoch}';
+    await _c.from('projects').update({'logo_url': url}).eq('id', projectId);
+    return url;
+  }
+
+  Future<void> removeProjectLogo(int projectId) async {
+    await _c.from('projects').update({'logo_url': null}).eq('id', projectId);
+  }
 
   // ---------------- Cost items ----------------
 
@@ -458,5 +489,125 @@ class AppDatabase {
       out.add(await monthlyReport(projectId, month));
     }
     return out;
+  }
+
+  // ---------------- Custom date-range report (printable summary) ----------------
+
+  List<String> _monthsBetween(String startDate, String endDate) {
+    final start = DateTime.parse(startDate);
+    final end = DateTime.parse(endDate);
+    final months = <String>[];
+    var cursor = DateTime(start.year, start.month);
+    final last = DateTime(end.year, end.month);
+    while (!cursor.isAfter(last)) {
+      months.add(
+          '${cursor.year}-${cursor.month.toString().padLeft(2, '0')}');
+      cursor = DateTime(cursor.year, cursor.month + 1);
+    }
+    return months;
+  }
+
+  Future<double> salesForRange(
+      int projectId, String startDate, String endDate) async {
+    final rows = await _c
+        .from('daily_records')
+        .select('sales_amount')
+        .eq('project_id', projectId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+    return (rows as List).fold<double>(
+        0.0, (s, r) => s + (r['sales_amount'] as num).toDouble());
+  }
+
+  Future<double> dailyExpensesForRange(
+      int projectId, String startDate, String endDate) async {
+    final rows = await _c
+        .from('daily_expenses')
+        .select('amount')
+        .eq('project_id', projectId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+    return (rows as List)
+        .fold<double>(0.0, (s, r) => s + (r['amount'] as num).toDouble());
+  }
+
+  Future<double> inventoryConsumptionForRange(
+      int projectId, String startDate, String endDate) async {
+    final usage = await _c
+        .from('inventory_usage')
+        .select('item_id, quantity')
+        .eq('project_id', projectId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+    final items = await _c
+        .from('inventory_items')
+        .select('id, purchase_price, purchase_quantity')
+        .eq('project_id', projectId);
+    final unitCost = <int, double>{};
+    for (final it in (items as List)) {
+      final qty = (it['purchase_quantity'] as num).toDouble();
+      final price = (it['purchase_price'] as num).toDouble();
+      unitCost[it['id'] as int] = qty <= 0 ? 0 : price / qty;
+    }
+    double total = 0;
+    for (final u in (usage as List)) {
+      final cost = unitCost[u['item_id'] as int] ?? 0;
+      total += (u['quantity'] as num).toDouble() * cost;
+    }
+    return total;
+  }
+
+  /// Product (operating-cost item) cost across a date range: each usage row
+  /// is priced with that item's cost for the month it falls in.
+  Future<double> productCostForRange(
+      int projectId, String startDate, String endDate) async {
+    final rows = await _c
+        .from('cost_usage')
+        .select('item_id, date, quantity')
+        .eq('project_id', projectId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+    final costCache = <String, double>{}; // '$itemId-$month' -> cost
+    double total = 0;
+    for (final u in (rows as List)) {
+      final itemId = u['item_id'] as int;
+      final date = u['date'] as String;
+      final month = date.substring(0, 7);
+      final key = '$itemId-$month';
+      var cost = costCache[key];
+      if (cost == null) {
+        cost = await costForItemMonth(projectId, itemId, month);
+        costCache[key] = cost;
+      }
+      total += (u['quantity'] as num).toDouble() * cost;
+    }
+    return total;
+  }
+
+  /// Fixed expenses across a range = sum of each month's applicable fixed
+  /// expenses for every month the range touches.
+  Future<double> fixedExpensesForRange(
+      int projectId, String startDate, String endDate) async {
+    double total = 0;
+    for (final month in _monthsBetween(startDate, endDate)) {
+      total += await fixedExpensesForMonth(projectId, month);
+    }
+    return total;
+  }
+
+  Future<PeriodReport> rangeReport(
+      int projectId, String startDate, String endDate) async {
+    return PeriodReport(
+      startDate: startDate,
+      endDate: endDate,
+      totalSales: await salesForRange(projectId, startDate, endDate),
+      productCost: await productCostForRange(projectId, startDate, endDate),
+      dailyExpenses:
+          await dailyExpensesForRange(projectId, startDate, endDate),
+      inventoryConsumption:
+          await inventoryConsumptionForRange(projectId, startDate, endDate),
+      fixedExpenses:
+          await fixedExpensesForRange(projectId, startDate, endDate),
+    );
   }
 }

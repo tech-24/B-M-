@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/app_theme.dart';
 import '../core/localization.dart';
@@ -98,6 +101,37 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     _load();
   }
 
+  Future<void> _changeLogo(Project p) async {
+    final t = L10n.of(context).t;
+    final messenger = ScaffoldMessenger.of(context);
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 90,
+    );
+    if (picked == null) return;
+
+    final Uint8List bytes = await picked.readAsBytes();
+    final ext = picked.name.contains('.')
+        ? picked.name.split('.').last.toLowerCase()
+        : 'png';
+
+    try {
+      await _db.uploadProjectLogo(p.id!, bytes, ext);
+      messenger.showSnackBar(SnackBar(content: Text(t('logoUpdated'))));
+      _load();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(t('logoUploadFailed'))));
+    }
+  }
+
+  Future<void> _removeLogo(Project p) async {
+    await _db.removeProjectLogo(p.id!);
+    _load();
+  }
+
   Future<void> _deleteProject(Project p) async {
     final t = L10n.of(context).t;
     final ok = await showDialog<bool>(
@@ -183,8 +217,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 children: [
                   CircleAvatar(
                     backgroundColor: AppColors.primary.withOpacity(.12),
-                    child: const Icon(Icons.storefront,
-                        color: AppColors.primary),
+                    backgroundImage: (p.logoUrl != null && p.logoUrl!.isNotEmpty)
+                        ? NetworkImage(p.logoUrl!)
+                        : null,
+                    child: (p.logoUrl == null || p.logoUrl!.isEmpty)
+                        ? const Icon(Icons.storefront, color: AppColors.primary)
+                        : null,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -207,10 +245,20 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'edit') _editProject(existing: p);
+                      if (v == 'logo') _changeLogo(p);
+                      if (v == 'removeLogo') _removeLogo(p);
                       if (v == 'delete') _deleteProject(p);
                     },
                     itemBuilder: (_) => [
                       PopupMenuItem(value: 'edit', child: Text(t('edit'))),
+                      PopupMenuItem(
+                          value: 'logo',
+                          child: Text((p.logoUrl == null || p.logoUrl!.isEmpty)
+                              ? t('addLogo')
+                              : t('changeLogo'))),
+                      if (p.logoUrl != null && p.logoUrl!.isNotEmpty)
+                        PopupMenuItem(
+                            value: 'removeLogo', child: Text(t('removeLogo'))),
                       PopupMenuItem(value: 'delete', child: Text(t('delete'))),
                     ],
                   ),

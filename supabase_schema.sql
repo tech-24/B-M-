@@ -11,8 +11,12 @@ create table if not exists public.projects (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name text not null,
   description text not null default '',
+  logo_url text,
   created_at timestamptz not null default now()
 );
+
+-- Run this if the "projects" table already existed before the logo feature:
+alter table public.projects add column if not exists logo_url text;
 
 create table if not exists public.cost_items (
   id bigint generated always as identity primary key,
@@ -131,6 +135,24 @@ create policy "own rows" on public.daily_expenses for all using (auth.uid() = us
 create policy "own rows" on public.inventory_items for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "own rows" on public.inventory_usage for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "own rows" on public.fixed_expenses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ---------- Storage bucket for per-project logos (used in-app and in printed reports) ----------
+
+insert into storage.buckets (id, name, public)
+values ('project-logos', 'project-logos', true)
+on conflict (id) do nothing;
+
+-- Anyone can read a logo (needed to display it and to embed it in printed PDFs).
+create policy if not exists "project logos are publicly readable"
+on storage.objects for select
+using (bucket_id = 'project-logos');
+
+-- A user can only upload/replace/delete logos stored under their own uid folder,
+-- e.g. project-logos/{user_id}/{project_id}.png
+create policy if not exists "users manage their own project logos"
+on storage.objects for all
+using (bucket_id = 'project-logos' and (storage.foldername(name))[1] = auth.uid()::text)
+with check (bucket_id = 'project-logos' and (storage.foldername(name))[1] = auth.uid()::text);
 
 -- Helpful indexes for the lookups the app does most often.
 create index if not exists idx_daily_records_proj_date on public.daily_records (project_id, date);

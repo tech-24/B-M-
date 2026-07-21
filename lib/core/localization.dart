@@ -200,6 +200,32 @@ class L10n {
     },
     'restoreFailed': {'ar': 'تعذّرت الاستعادة (تأكد من وجود نسخة محفوظة)', 'en': 'Restore failed (make sure a backup exists)'},
     'signedInAs': {'ar': 'مسجّل الدخول بـ', 'en': 'Signed in as'},
+
+    // Printable period summary
+    'printSummary': {'ar': 'طباعة ملخص', 'en': 'Print summary'},
+    'selectPeriod': {'ar': 'اختر الفترة', 'en': 'Select period'},
+    'oneMonth': {'ar': 'شهر', 'en': '1 month'},
+    'threeMonths': {'ar': '٣ أشهر', 'en': '3 months'},
+    'sixMonths': {'ar': '٦ أشهر', 'en': '6 months'},
+    'nineMonths': {'ar': '٩ أشهر', 'en': '9 months'},
+    'oneYear': {'ar': 'سنة', 'en': '1 year'},
+    'customRange': {'ar': 'تحديد يدوي', 'en': 'Custom range'},
+    'fromDate': {'ar': 'من تاريخ', 'en': 'From'},
+    'toDate': {'ar': 'إلى تاريخ', 'en': 'To'},
+    'chooseDateRange': {'ar': 'اختر الفترة الزمنية', 'en': 'Choose date range'},
+    'generateReport': {'ar': 'إنشاء التقرير', 'en': 'Generate report'},
+    'reportPeriod': {'ar': 'فترة التقرير', 'en': 'Report period'},
+    'generatedOn': {'ar': 'تاريخ الإنشاء', 'en': 'Generated on'},
+    'summaryReport': {'ar': 'ملخص تقرير', 'en': 'Summary report'},
+    'preparingReport': {'ar': 'جارٍ تجهيز التقرير...', 'en': 'Preparing report...'},
+
+    // Project logo
+    'projectLogo': {'ar': 'شعار المشروع', 'en': 'Project logo'},
+    'changeLogo': {'ar': 'تغيير الشعار', 'en': 'Change logo'},
+    'addLogo': {'ar': 'إضافة شعار', 'en': 'Add logo'},
+    'removeLogo': {'ar': 'إزالة الشعار', 'en': 'Remove logo'},
+    'logoUpdated': {'ar': 'تم تحديث الشعار', 'en': 'Logo updated'},
+    'logoUploadFailed': {'ar': 'تعذّر رفع الشعار', 'en': 'Failed to upload logo'},
   };
 
   String t(String key) => _s[key]?[locale.languageCode] ?? key;

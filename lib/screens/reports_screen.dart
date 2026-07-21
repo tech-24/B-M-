@@ -1,9 +1,14 @@
+import 'dart:typed_data';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 
 import '../core/app_theme.dart';
 import '../core/localization.dart';
+import '../core/report_pdf.dart';
 import '../data/db.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
@@ -43,12 +48,177 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
   }
 
+  // ---------------- Printable period summary ----------------
+
+  String _shiftDate(String dateStr, {int months = 0, int days = 0}) {
+    var d = DateFormat('yyyy-MM-dd').parse(dateStr);
+    if (months != 0) d = DateTime(d.year, d.month - months, d.day);
+    if (days != 0) d = d.add(Duration(days: days));
+    return DateFormat('yyyy-MM-dd').format(d);
+  }
+
+  Future<void> _openPrintSheet() async {
+    final t = L10n.of(context).t;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(t('selectPeriod'),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 16),
+              for (final opt in const [
+                ['1m', 'oneMonth'],
+                ['3m', 'threeMonths'],
+                ['6m', 'sixMonths'],
+                ['9m', 'nineMonths'],
+                ['1y', 'oneYear'],
+              ])
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.calendar_today_outlined),
+                  title: Text(t(opt[1])),
+                  onTap: () => Navigator.pop(ctx, opt[0]),
+                ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.date_range_outlined),
+                title: Text(t('customRange')),
+                onTap: () => Navigator.pop(ctx, 'custom'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    String start;
+    String end = todayStr();
+    switch (choice) {
+      case '1m':
+        start = _shiftDate(end, months: 1);
+        break;
+      case '3m':
+        start = _shiftDate(end, months: 3);
+        break;
+      case '6m':
+        start = _shiftDate(end, months: 6);
+        break;
+      case '9m':
+        start = _shiftDate(end, months: 9);
+        break;
+      case '1y':
+        start = _shiftDate(end, months: 12);
+        break;
+      case 'custom':
+        final now = DateTime.now();
+        final picked = await showDateRangePicker(
+          context: context,
+          firstDate: DateTime(now.year - 5),
+          lastDate: now,
+          initialDateRange: DateTimeRange(
+              start: now.subtract(const Duration(days: 30)), end: now),
+          helpText: t('chooseDateRange'),
+        );
+        if (picked == null || !mounted) return;
+        start = DateFormat('yyyy-MM-dd').format(picked.start);
+        end = DateFormat('yyyy-MM-dd').format(picked.end);
+        break;
+      default:
+        return;
+    }
+    await _generateAndPrint(start, end);
+  }
+
+  Future<void> _generateAndPrint(String start, String end) async {
+    final t = L10n.of(context).t;
+    final lang = L10n.of(context).locale.languageCode;
+    final isAr = L10n.of(context).isAr;
+    final messenger = ScaffoldMessenger.of(context);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(children: [
+          const CircularProgressIndicator(),
+          const SizedBox(width: 16),
+          Expanded(child: Text(t('preparingReport'))),
+        ]),
+      ),
+    );
+
+    try {
+      final report = await _db.rangeReport(widget.project.id!, start, end);
+
+      Uint8List? logoBytes;
+      final logoUrl = widget.project.logoUrl;
+      if (logoUrl != null && logoUrl.isNotEmpty) {
+        try {
+          final resp = await http.get(Uri.parse(logoUrl));
+          if (resp.statusCode == 200) logoBytes = resp.bodyBytes;
+        } catch (_) {
+          // Logo fetch failing shouldn't block the report itself.
+        }
+      }
+
+      final df = DateFormat.yMMMd(lang);
+      final periodLabel =
+          '${df.format(DateFormat('yyyy-MM-dd').parse(start))} — ${df.format(DateFormat('yyyy-MM-dd').parse(end))}';
+      final generatedOn =
+          '${t('generatedOn')}: ${DateFormat.yMMMd(lang).add_jm().format(DateTime.now())}';
+
+      final bytes = await buildPeriodReportPdf(
+        projectName: widget.project.name,
+        periodLabel: periodLabel,
+        generatedOnLabel: generatedOn,
+        report: report,
+        isArabic: isAr,
+        money: (v) => fmtNum(v) + ' ${t('sar')}',
+        labels: {
+          'netProfit': t('netProfit'),
+          'breakdown': t('monthlyReport'),
+          'totalRevenue': t('totalRevenue'),
+          'productCost': t('productCost'),
+          'inventoryConsumption': t('inventoryConsumption'),
+          'dailyExpenses': t('dailyExpenses'),
+          'fixedExpenses': t('fixedExpenses'),
+        },
+        logoBytes: logoBytes,
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context); // close loading dialog
+
+      await Printing.layoutPdf(
+        name: '${widget.project.name}_${start}_$end.pdf',
+        onLayout: (_) async => bytes,
+      );
+    } catch (e) {
+      if (mounted) Navigator.pop(context); // close loading dialog
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = L10n.of(context).t;
     final r = _report;
     return Scaffold(
-      appBar: AppBar(title: Text(t('reports'))),
+      appBar: AppBar(title: Text(t('reports')), actions: [
+        IconButton(
+          tooltip: t('printSummary'),
+          icon: const Icon(Icons.print_outlined),
+          onPressed: _loading ? null : _openPrintSheet,
+        ),
+      ]),
       body: _loading || r == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(

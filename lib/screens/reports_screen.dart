@@ -212,9 +212,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
     // Navigator again here, so the report screen is never accidentally
     // closed.
     try {
-      await Printing.layoutPdf(
-        name: '${widget.project.name}_${start}_$end.pdf',
-        onLayout: (_) async => bytes!,
+      await Printing.sharePdf(
+        bytes: bytes!,
+        filename: '${widget.project.name}_${start}_$end.pdf',
       );
     } catch (e) {
       messenger.showSnackBar(SnackBar(

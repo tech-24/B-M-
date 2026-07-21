@@ -226,6 +226,14 @@ class L10n {
     'removeLogo': {'ar': 'إزالة الشعار', 'en': 'Remove logo'},
     'logoUpdated': {'ar': 'تم تحديث الشعار', 'en': 'Logo updated'},
     'logoUploadFailed': {'ar': 'تعذّر رفع الشعار', 'en': 'Failed to upload logo'},
+    'deleteProjectTypeNameHint': {
+      'ar': 'للتأكيد، اكتب اسم المشروع بالضبط:',
+      'en': 'To confirm, type the project name exactly:'
+    },
+    'nameDoesNotMatch': {
+      'ar': 'الاسم غير مطابق',
+      'en': 'Name does not match'
+    },
   };
 
   String t(String key) => _s[key]?[locale.languageCode] ?? key;

@@ -138,21 +138,56 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _deleteProject(Project p) async {
     final t = L10n.of(context).t;
+    final confirmCtl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(t('deleteProject')),
-        content: Text(t('deleteProjectConfirm')),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(t('cancel'))),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.bad),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(t('delete')),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final matches = confirmCtl.text == p.name;
+          return AlertDialog(
+            title: Text(t('deleteProject')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t('deleteProjectConfirm')),
+                const SizedBox(height: 14),
+                Text(t('deleteProjectTypeNameHint'),
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text(p.name,
+                    style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.bad,
+                        fontSize: 15)),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: confirmCtl,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => setDialogState(() {}),
+                ),
+                if (confirmCtl.text.isNotEmpty && !matches) ...[
+                  const SizedBox(height: 6),
+                  Text(t('nameDoesNotMatch'),
+                      style: TextStyle(color: AppColors.bad, fontSize: 12)),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(t('cancel'))),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: AppColors.bad),
+                onPressed: matches ? () => Navigator.pop(ctx, true) : null,
+                child: Text(t('delete')),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (ok == true) {

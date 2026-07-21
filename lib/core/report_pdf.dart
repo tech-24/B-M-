@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../models/models.dart';
 
@@ -23,11 +24,11 @@ Future<Uint8List> buildPeriodReportPdf({
   final doc = pw.Document();
 
   final baseFont = isArabic
-      ? await pw.PdfGoogleFonts.notoNaskhArabicRegular()
-      : await pw.PdfGoogleFonts.notoSansRegular();
+      ? await PdfGoogleFonts.notoNaskhArabicRegular()
+      : await PdfGoogleFonts.notoSansRegular();
   final boldFont = isArabic
-      ? await pw.PdfGoogleFonts.notoNaskhArabicBold()
-      : await pw.PdfGoogleFonts.notoSansBold();
+      ? await PdfGoogleFonts.notoNaskhArabicBold()
+      : await PdfGoogleFonts.notoSansBold();
 
   final textDirection = isArabic ? pw.TextDirection.rtl : pw.TextDirection.ltr;
   final align = isArabic ? pw.TextAlign.right : pw.TextAlign.left;

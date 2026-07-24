@@ -309,6 +309,12 @@ class L10n {
     },
     'deletedForever': {'ar': 'تم الحذف النهائي', 'en': 'Deleted permanently'},
     'deletedItemLabel': {'ar': '(صنف محذوف)', 'en': '(deleted item)'},
+    'deleteMistake': {'ar': 'حذف (تصحيح غلط)', 'en': 'Delete (fix mistake)'},
+    'deleteMistakeWarning': {
+      'ar': 'استخدم هذا الخيار بس لو أضفت المصروف بالغلط. الحذف هنا كامل ونهائي، وأي أثر له بأي تقرير سابق سيُمحى تمامًا (مو محفوظ). لو المصروف كان شغّال فترة حقيقية وتبي تحافظ على أرقام التقارير القديمة، استخدم "حذف نهائي" بدلًا من هذا.',
+      'en': 'Use this only if you added the expense by mistake. This delete is complete and permanent — any effect it had on past reports is erased entirely (not preserved). If the expense was genuinely active for a while and you want past report figures to stay intact, use "Delete permanently" instead.'
+    },
+    'deletedCompletely': {'ar': 'تم الحذف الكامل', 'en': 'Deleted completely'},
     'linkToProductCostFailed': {
       'ar': 'تعذّر الربط — يوجد صنف بنفس الاسم بقائمة تكلفة المنتجات المستخدمة مسبقًا. غيّر اسم صنف المخزون أو اربطه يدويًا لاحقًا بعد حل التعارض.',
       'en': 'Couldn\'t link — a product with this name already exists in "cost of products used". Rename the inventory item, or resolve the conflict and link it manually later.'

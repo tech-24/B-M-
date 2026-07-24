@@ -428,9 +428,12 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                         final item = _items.firstWhere(
                             (it) => it.id == u.itemId,
                             orElse: () => CostItem(
-                                projectId: widget.project.id!, name: '—'));
+                                projectId: widget.project.id!,
+                                name: u.itemNameSnapshot ??
+                                    L10n.of(context).t('deletedItemLabel')));
                         final cost =
                             u.quantity * (u.unitCost ?? (_itemCost[u.itemId] ?? 0));
+                        final canEdit = u.itemId != null;
                         return ListTile(
                           dense: true,
                           title: Text(item.name),
@@ -442,12 +445,13 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                               Text(fmtMoney(context, cost),
                                   style: const TextStyle(
                                       fontWeight: FontWeight.w700)),
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined,
-                                    size: 20),
-                                onPressed: () =>
-                                    _addOrEditUsage(existing: u),
-                              ),
+                              if (canEdit)
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined,
+                                      size: 20),
+                                  onPressed: () =>
+                                      _addOrEditUsage(existing: u),
+                                ),
                               IconButton(
                                 icon: const Icon(Icons.delete_outline,
                                     size: 20),

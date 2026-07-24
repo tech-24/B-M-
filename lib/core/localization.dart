@@ -302,6 +302,13 @@ class L10n {
       'en': 'Enter the new batch you just bought — it\'s added on top of your current stock automatically. Past usage keeps its old price unchanged.'
     },
     'restocked': {'ar': 'تمت إعادة التعبئة', 'en': 'Restocked'},
+    'deletePermanently': {'ar': 'حذف نهائي', 'en': 'Delete permanently'},
+    'deletePermanentlyWarning': {
+      'ar': 'هذا حذف نهائي كامل من الأرشيف — لا يمكن التراجع عنه. الأرقام في التقارير السابقة تبقى صحيحة كما هي ولن تتأثر، لكن الصنف نفسه سيختفي نهائيًا من كل مكان.',
+      'en': 'This permanently removes it from the archive — this cannot be undone. Figures in past reports stay exactly as they are and won\'t change, but the item itself will disappear everywhere for good.'
+    },
+    'deletedForever': {'ar': 'تم الحذف النهائي', 'en': 'Deleted permanently'},
+    'deletedItemLabel': {'ar': '(صنف محذوف)', 'en': '(deleted item)'},
     'linkToProductCostFailed': {
       'ar': 'تعذّر الربط — يوجد صنف بنفس الاسم بقائمة تكلفة المنتجات المستخدمة مسبقًا. غيّر اسم صنف المخزون أو اربطه يدويًا لاحقًا بعد حل التعارض.',
       'en': 'Couldn\'t link — a product with this name already exists in "cost of products used". Rename the inventory item, or resolve the conflict and link it manually later.'

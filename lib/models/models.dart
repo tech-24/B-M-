@@ -163,13 +163,20 @@ class CostEntry {
 class CostUsage {
   final int? id;
   final int projectId;
-  final int itemId;
+  /// Null only when the item was permanently deleted after this sale was
+  /// recorded — see [itemNameSnapshot] for its name in that case.
+  final int? itemId;
   final String date; // yyyy-MM-dd
   final double quantity;
-  /// Locked-in per-unit cost, set only when this item is linked to an
-  /// inventory item (derived from that item's price at the time of sale).
-  /// Null for unlinked items (their cost comes from monthly CostEntry).
+  /// Locked-in per-unit cost, set for items linked to inventory (derived
+  /// from that item's price at time of sale) AND for any row whose item
+  /// was later permanently deleted (frozen at deletion time). Null only
+  /// for unlinked, never-deleted items (their cost comes from monthly
+  /// CostEntry, looked up live).
   final double? unitCost;
+  /// The item's name, frozen at the moment it was permanently deleted.
+  /// Null unless that has happened — normally look up the name via itemId.
+  final String? itemNameSnapshot;
 
   CostUsage({
     this.id,
@@ -178,6 +185,7 @@ class CostUsage {
     required this.date,
     required this.quantity,
     this.unitCost,
+    this.itemNameSnapshot,
   });
 
   Map<String, dynamic> toMap() => {
@@ -187,15 +195,17 @@ class CostUsage {
         'date': date,
         'quantity': quantity,
         'unit_cost': unitCost,
+        'item_name_snapshot': itemNameSnapshot,
       };
 
   factory CostUsage.fromMap(Map<String, dynamic> m) => CostUsage(
         id: m['id'] as int?,
         projectId: m['project_id'] as int,
-        itemId: m['item_id'] as int,
+        itemId: m['item_id'] as int?,
         date: m['date'] as String,
         quantity: (m['quantity'] as num).toDouble(),
         unitCost: (m['unit_cost'] as num?)?.toDouble(),
+        itemNameSnapshot: m['item_name_snapshot'] as String?,
       );
 }
 
@@ -303,13 +313,17 @@ class InventoryItem {
 class InventoryUsage {
   final int? id;
   final int projectId;
-  final int itemId;
+  /// Null only when the item was permanently deleted after this usage was
+  /// recorded — see [itemNameSnapshot] for its name in that case.
+  final int? itemId;
   final String date; // yyyy-MM-dd
   final double quantity;
   /// Unit cost locked in at the moment this usage was recorded (so a later
   /// price change on the item never rewrites the cost of past days). Null
   /// only for rows recorded before this field existed.
   final double? unitCost;
+  /// The item's name, frozen at the moment it was permanently deleted.
+  final String? itemNameSnapshot;
 
   InventoryUsage({
     this.id,
@@ -318,6 +332,7 @@ class InventoryUsage {
     required this.date,
     required this.quantity,
     this.unitCost,
+    this.itemNameSnapshot,
   });
 
   Map<String, dynamic> toMap() => {
@@ -327,15 +342,17 @@ class InventoryUsage {
         'date': date,
         'quantity': quantity,
         'unit_cost': unitCost,
+        'item_name_snapshot': itemNameSnapshot,
       };
 
   factory InventoryUsage.fromMap(Map<String, dynamic> m) => InventoryUsage(
         id: m['id'] as int?,
         projectId: m['project_id'] as int,
-        itemId: m['item_id'] as int,
+        itemId: m['item_id'] as int?,
         date: m['date'] as String,
         quantity: (m['quantity'] as num).toDouble(),
         unitCost: (m['unit_cost'] as num?)?.toDouble(),
+        itemNameSnapshot: m['item_name_snapshot'] as String?,
       );
 }
 

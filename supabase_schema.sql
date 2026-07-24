@@ -50,10 +50,11 @@ create table if not exists public.cost_usage (
   id bigint generated always as identity primary key,
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   project_id bigint not null references public.projects(id) on delete cascade,
-  item_id bigint not null references public.cost_items(id) on delete cascade,
+  item_id bigint references public.cost_items(id) on delete set null,
   date text not null,
   quantity numeric not null,
   unit_cost numeric,
+  item_name_snapshot text,
   unique (project_id, item_id, date)
 );
 
@@ -61,6 +62,16 @@ create table if not exists public.cost_usage (
 -- inventory, this locks in the derived per-unit cost at the moment of the
 -- sale, so a later inventory price change never rewrites a past day.
 alter table public.cost_usage add column if not exists unit_cost numeric;
+
+-- Run this if "cost_usage" already existed: lets a cost item be
+-- permanently deleted later without breaking old sale rows — item_id can
+-- become null, and item_name_snapshot preserves the item's name for
+-- display even after it's gone (see permanently_delete_cost_item below).
+alter table public.cost_usage add column if not exists item_name_snapshot text;
+alter table public.cost_usage alter column item_id drop not null;
+alter table public.cost_usage drop constraint if exists cost_usage_item_id_fkey;
+alter table public.cost_usage add constraint cost_usage_item_id_fkey
+  foreign key (item_id) references public.cost_items(id) on delete set null;
 
 create table if not exists public.daily_records (
   id bigint generated always as identity primary key,
@@ -113,10 +124,11 @@ create table if not exists public.inventory_usage (
   id bigint generated always as identity primary key,
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   project_id bigint not null references public.projects(id) on delete cascade,
-  item_id bigint not null references public.inventory_items(id) on delete cascade,
+  item_id bigint references public.inventory_items(id) on delete set null,
   date text not null,
   quantity numeric not null,
   unit_cost numeric,
+  item_name_snapshot text,
   -- Set only for usage rows generated automatically from a linked cost-item
   -- sale (see upsert_linked_cost_usage below). Null for manual entries.
   source_cost_usage_id bigint references public.cost_usage(id) on delete set null
@@ -130,6 +142,16 @@ alter table public.inventory_usage add column if not exists source_cost_usage_id
 create unique index if not exists idx_inventory_usage_source_cost_usage
   on public.inventory_usage (source_cost_usage_id)
   where source_cost_usage_id is not null;
+
+-- Run this if "inventory_usage" already existed: lets an inventory item be
+-- permanently deleted later without breaking old usage rows — item_id can
+-- become null, and item_name_snapshot preserves the item's name for
+-- display even after it's gone (see permanently_delete_inventory_item below).
+alter table public.inventory_usage add column if not exists item_name_snapshot text;
+alter table public.inventory_usage alter column item_id drop not null;
+alter table public.inventory_usage drop constraint if exists inventory_usage_item_id_fkey;
+alter table public.inventory_usage add constraint inventory_usage_item_id_fkey
+  foreign key (item_id) references public.inventory_items(id) on delete set null;
 
 create table if not exists public.fixed_expenses (
   id bigint generated always as identity primary key,
@@ -333,6 +355,79 @@ begin
 end;
 $$;
 
+-- Permanently deletes a "cost of products used" item WITHOUT touching any
+-- past report: every sale row tied to it first gets its per-unit cost
+-- frozen (mirroring the exact same "exact month, else most recent prior
+-- month" rule the app already uses) and the item's name snapshotted, so
+-- the row no longer needs the item to exist. Only then is the item
+-- actually deleted (item_id on those rows becomes null via ON DELETE SET
+-- NULL — the row itself is never touched).
+create or replace function public.permanently_delete_cost_item(p_item_id bigint)
+returns void
+language plpgsql
+security invoker
+as $$
+declare
+  v_name text;
+begin
+  select name into v_name from public.cost_items where id = p_item_id;
+  if v_name is null then
+    return;
+  end if;
+
+  update public.cost_usage cu
+  set unit_cost = coalesce(
+        cu.unit_cost,
+        (
+          select ch.cost from public.cost_history ch
+          where ch.item_id = p_item_id
+            and ch.month <= substring(cu.date, 1, 7)
+          order by (ch.month = substring(cu.date, 1, 7)) desc, ch.month desc
+          limit 1
+        ),
+        0
+      ),
+      item_name_snapshot = v_name
+  where cu.item_id = p_item_id;
+
+  delete from public.cost_items where id = p_item_id;
+end;
+$$;
+
+-- Same idea for an inventory item: freezes each usage row's unit cost
+-- (using the item's current price, same fallback the app already uses for
+-- old rows) and its name, then deletes the item. Note: if this item is
+-- linked to a "cost of products used" item, that link is cleared
+-- automatically (linked_inventory_item_id has ON DELETE SET NULL) — the
+-- linked product itself is NOT deleted, just unlinked.
+create or replace function public.permanently_delete_inventory_item(p_item_id bigint)
+returns void
+language plpgsql
+security invoker
+as $$
+declare
+  v_name text;
+  v_price numeric;
+  v_qty numeric;
+  v_unit_cost numeric;
+begin
+  select name, purchase_price, purchase_quantity
+    into v_name, v_price, v_qty
+  from public.inventory_items where id = p_item_id;
+  if v_name is null then
+    return;
+  end if;
+  v_unit_cost := case when v_qty is null or v_qty <= 0 then 0 else v_price / v_qty end;
+
+  update public.inventory_usage iu
+  set unit_cost = coalesce(iu.unit_cost, v_unit_cost),
+      item_name_snapshot = v_name
+  where iu.item_id = p_item_id;
+
+  delete from public.inventory_items where id = p_item_id;
+end;
+$$;
+
 alter table public.projects enable row level security;
 alter table public.cost_items enable row level security;
 alter table public.cost_history enable row level security;
@@ -343,14 +438,23 @@ alter table public.inventory_items enable row level security;
 alter table public.inventory_usage enable row level security;
 alter table public.fixed_expenses enable row level security;
 
+drop policy if exists "own rows" on public.projects;
 create policy "own rows" on public.projects for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.cost_items;
 create policy "own rows" on public.cost_items for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.cost_history;
 create policy "own rows" on public.cost_history for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.cost_usage;
 create policy "own rows" on public.cost_usage for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.daily_records;
 create policy "own rows" on public.daily_records for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.daily_expenses;
 create policy "own rows" on public.daily_expenses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.inventory_items;
 create policy "own rows" on public.inventory_items for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.inventory_usage;
 create policy "own rows" on public.inventory_usage for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.fixed_expenses;
 create policy "own rows" on public.fixed_expenses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ---------- Storage bucket for per-project logos (used in-app and in printed reports) ----------
@@ -360,13 +464,15 @@ values ('project-logos', 'project-logos', true)
 on conflict (id) do nothing;
 
 -- Anyone can read a logo (needed to display it and to embed it in printed PDFs).
-create policy if not exists "project logos are publicly readable"
+drop policy if exists "project logos are publicly readable" on storage.objects;
+create policy "project logos are publicly readable"
 on storage.objects for select
 using (bucket_id = 'project-logos');
 
 -- A user can only upload/replace/delete logos stored under their own uid folder,
 -- e.g. project-logos/{user_id}/{project_id}.png
-create policy if not exists "users manage their own project logos"
+drop policy if exists "users manage their own project logos" on storage.objects;
+create policy "users manage their own project logos"
 on storage.objects for all
 using (bucket_id = 'project-logos' and (storage.foldername(name))[1] = auth.uid()::text)
 with check (bucket_id = 'project-logos' and (storage.foldername(name))[1] = auth.uid()::text);

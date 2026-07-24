@@ -110,6 +110,13 @@ class AppDatabase {
   Future<void> unlinkCostItem(int itemId) async =>
       updateCostItemLink(itemId, null, null);
 
+  /// Permanently deletes a cost item — safe even if it has sale history:
+  /// every past sale's cost gets frozen first (see
+  /// permanently_delete_cost_item in supabase_schema.sql), so old reports
+  /// never change. Only use this from the "archived items" list.
+  Future<void> permanentlyDeleteCostItem(int itemId) async =>
+      _c.rpc('permanently_delete_cost_item', params: {'p_item_id': itemId});
+
   Future<void> archiveCostItem(int id) async =>
       _c.from('cost_items').update({'archived': true}).eq('id', id);
 
@@ -255,9 +262,12 @@ class AppDatabase {
       if (u.unitCost != null) {
         cost = u.unitCost!;
       } else {
-        cost = costCache[u.itemId] ??
-            (costCache[u.itemId] =
-                await costForItemMonth(projectId, u.itemId, month));
+        // unitCost is only null for a row whose item still exists (never
+        // permanently deleted), so itemId is guaranteed non-null here.
+        final itemId = u.itemId!;
+        cost = costCache[itemId] ??
+            (costCache[itemId] =
+                await costForItemMonth(projectId, itemId, month));
       }
       result[u.date] = (result[u.date] ?? 0) + u.quantity * cost;
     }
@@ -410,6 +420,14 @@ class AppDatabase {
 
   Future<void> archiveInventoryItem(int id) async =>
       _c.from('inventory_items').update({'archived': true}).eq('id', id);
+
+  /// Permanently deletes an inventory item — safe even if it has usage
+  /// history: every past usage row's cost gets frozen first (see
+  /// permanently_delete_inventory_item in supabase_schema.sql), so old
+  /// reports never change. If linked to a cost item, that link is cleared
+  /// automatically. Only use this from the "archived items" list.
+  Future<void> permanentlyDeleteInventoryItem(int itemId) async => _c.rpc(
+      'permanently_delete_inventory_item', params: {'p_item_id': itemId});
 
   /// Adds a new purchase batch on top of the item's existing totals
   /// (never overwrites them) — see restock_inventory_item in
@@ -755,56 +773,88 @@ class AppDatabase {
   /// Per-item inventory breakdown for the printed report: quantity
   /// consumed + its cost during [startDate]..[endDate], plus how much is
   /// left right now. Archived items are included if they were consumed
-  /// during the period (so old reports stay complete).
+  /// during the period (so old reports stay complete). Permanently-deleted
+  /// items (item_id null) are grouped by their frozen name snapshot
+  /// instead, with no "remaining" figure since the item no longer exists.
   Future<List<InventoryBreakdownRow>> inventoryBreakdownForRange(
       int projectId, String startDate, String endDate) async {
     final usage = await _c
         .from('inventory_usage')
-        .select('item_id, quantity, unit_cost')
+        .select('item_id, quantity, unit_cost, item_name_snapshot')
         .eq('project_id', projectId)
         .gte('date', startDate)
         .lte('date', endDate);
 
-    final consumedQty = <int, double>{};
-    final consumedCost = <int, double>{};
+    // Group by item_id when it still exists, otherwise by the frozen name
+    // (String key works for both: 'id:3' or 'deleted:اسم الصنف').
+    final consumedQty = <String, double>{};
+    final consumedCost = <String, double>{};
+    final deletedNames = <String, String>{}; // key -> snapshot name
     Map<int, double>? legacyCosts;
     for (final u in (usage as List)) {
-      final itemId = u['item_id'] as int;
+      final itemId = u['item_id'] as int?;
+      final snapshotName = u['item_name_snapshot'] as String?;
+      final key = itemId != null ? 'id:$itemId' : 'deleted:${snapshotName ?? '—'}';
+      if (itemId == null) deletedNames[key] = snapshotName ?? '—';
+
       final qty = (u['quantity'] as num).toDouble();
       final locked = u['unit_cost'];
       double cost;
       if (locked != null) {
         cost = (locked as num).toDouble();
       } else {
+        // Only reachable when itemId is non-null (permanently-deleted rows
+        // always have unit_cost frozen already).
         legacyCosts ??= await _currentInventoryUnitCosts(projectId);
-        cost = legacyCosts[itemId] ?? 0;
+        cost = legacyCosts[itemId!] ?? 0;
       }
-      consumedQty[itemId] = (consumedQty[itemId] ?? 0) + qty;
-      consumedCost[itemId] = (consumedCost[itemId] ?? 0) + qty * cost;
+      consumedQty[key] = (consumedQty[key] ?? 0) + qty;
+      consumedCost[key] = (consumedCost[key] ?? 0) + qty * cost;
     }
 
     if (consumedQty.isEmpty) return [];
 
-    final items = await _c
-        .from('inventory_items')
-        .select('id, name, unit, purchase_quantity, used_quantity')
-        .eq('project_id', projectId)
-        .inFilter('id', consumedQty.keys.toList());
+    final liveIds = consumedQty.keys
+        .where((k) => k.startsWith('id:'))
+        .map((k) => int.parse(k.substring(3)))
+        .toList();
 
-    return (items as List).map((it) {
-      final id = it['id'] as int;
-      final purchaseQty = (it['purchase_quantity'] as num).toDouble();
-      final usedQty = (it['used_quantity'] as num).toDouble();
-      final remaining = (purchaseQty - usedQty).clamp(0, double.infinity);
-      return InventoryBreakdownRow(
-        name: it['name'] as String,
-        unit: (it['unit'] ?? '') as String,
-        consumedQty: consumedQty[id] ?? 0,
-        cost: consumedCost[id] ?? 0,
-        remainingNow: remaining.toDouble(),
-      );
-    }).toList()
-      ..sort((a, b) => b.cost.compareTo(a.cost));
+    final rows = <InventoryBreakdownRow>[];
+
+    if (liveIds.isNotEmpty) {
+      final items = await _c
+          .from('inventory_items')
+          .select('id, name, unit, purchase_quantity, used_quantity')
+          .eq('project_id', projectId)
+          .inFilter('id', liveIds);
+      for (final it in (items as List)) {
+        final id = it['id'] as int;
+        final key = 'id:$id';
+        final purchaseQty = (it['purchase_quantity'] as num).toDouble();
+        final usedQty = (it['used_quantity'] as num).toDouble();
+        final remaining = (purchaseQty - usedQty).clamp(0, double.infinity);
+        rows.add(InventoryBreakdownRow(
+          name: it['name'] as String,
+          unit: (it['unit'] ?? '') as String,
+          consumedQty: consumedQty[key] ?? 0,
+          cost: consumedCost[key] ?? 0,
+          remainingNow: remaining.toDouble(),
+        ));
+      }
+    }
+
+    for (final entry in deletedNames.entries) {
+      rows.add(InventoryBreakdownRow(
+        name: entry.value,
+        unit: '',
+        consumedQty: consumedQty[entry.key] ?? 0,
+        cost: consumedCost[entry.key] ?? 0,
+        remainingNow: 0,
+      ));
+    }
+
+    rows.sort((a, b) => b.cost.compareTo(a.cost));
+    return rows;
   }
 
   Future<PeriodReport> rangeReport(

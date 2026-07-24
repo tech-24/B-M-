@@ -225,6 +225,32 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     _load();
   }
 
+  Future<void> _deleteFixedPermanently(FixedExpense e) async {
+    final t = L10n.of(context).t;
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('deletePermanently')),
+        content: Text(t('deletePermanentlyWarning')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t('cancel'))),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.bad),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t('deletePermanently'))),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _db.permanentlyDeleteFixedExpense(e.id!);
+      messenger.showSnackBar(SnackBar(content: Text(t('deletedForever'))));
+      _load();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = L10n.of(context).t;
@@ -388,15 +414,20 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                           onSelected: (v) {
                             if (v == 'end') _endFixed(e);
                             if (v == 'reactivate') _reactivateFixed(e);
+                            if (v == 'deleteForever') _deleteFixedPermanently(e);
                           },
                           itemBuilder: (_) => [
                             if (!e.isEnded)
                               PopupMenuItem(
                                   value: 'end', child: Text(t('endExpense')))
-                            else
+                            else ...[
                               PopupMenuItem(
                                   value: 'reactivate',
                                   child: Text(t('reactivateExpense'))),
+                              PopupMenuItem(
+                                  value: 'deleteForever',
+                                  child: Text(t('deletePermanently'))),
+                            ],
                           ],
                         ),
                       ]),

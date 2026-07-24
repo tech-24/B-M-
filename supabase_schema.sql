@@ -169,6 +169,19 @@ create table if not exists public.fixed_expenses (
 -- already counted it stay correct forever.
 alter table public.fixed_expenses add column if not exists end_month text;
 
+-- One frozen row per month a permanently-deleted fixed expense actually
+-- applied to (see permanently_delete_fixed_expense below). fixedExpensesForMonth
+-- sums this alongside the live fixed_expenses table, so deleting an old,
+-- already-ended expense from the list never changes any past month's report.
+create table if not exists public.fixed_expense_history (
+  id bigint generated always as identity primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  project_id bigint not null references public.projects(id) on delete cascade,
+  month text not null,
+  name text not null,
+  amount numeric not null
+);
+
 -- Atomically records inventory usage AND increases the item's used_quantity
 -- (mirrors what a single local transaction used to do). The item's unit
 -- cost (purchase_price / purchase_quantity) is snapshotted into unit_cost
@@ -428,6 +441,43 @@ begin
 end;
 $$;
 
+-- Permanently deletes a fixed expense WITHOUT touching any past report:
+-- one frozen row is inserted into fixed_expense_history for every month it
+-- actually applied to (start_month through end_month, or through the
+-- current month if it was never ended), then the live row is deleted.
+create or replace function public.permanently_delete_fixed_expense(p_expense_id bigint)
+returns void
+language plpgsql
+security invoker
+as $$
+declare
+  v_project_id bigint;
+  v_name text;
+  v_amount numeric;
+  v_start text;
+  v_end text;
+begin
+  select project_id, name, monthly_amount, start_month,
+         coalesce(end_month, to_char(now(), 'YYYY-MM'))
+    into v_project_id, v_name, v_amount, v_start, v_end
+  from public.fixed_expenses where id = p_expense_id;
+
+  if v_name is null then
+    return;
+  end if;
+
+  insert into public.fixed_expense_history (project_id, month, name, amount)
+  select v_project_id, to_char(gs, 'YYYY-MM'), v_name, v_amount
+  from generate_series(
+    to_date(v_start || '-01', 'YYYY-MM-DD'),
+    to_date(v_end || '-01', 'YYYY-MM-DD'),
+    interval '1 month'
+  ) as gs;
+
+  delete from public.fixed_expenses where id = p_expense_id;
+end;
+$$;
+
 alter table public.projects enable row level security;
 alter table public.cost_items enable row level security;
 alter table public.cost_history enable row level security;
@@ -437,6 +487,7 @@ alter table public.daily_expenses enable row level security;
 alter table public.inventory_items enable row level security;
 alter table public.inventory_usage enable row level security;
 alter table public.fixed_expenses enable row level security;
+alter table public.fixed_expense_history enable row level security;
 
 drop policy if exists "own rows" on public.projects;
 create policy "own rows" on public.projects for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -456,6 +507,8 @@ drop policy if exists "own rows" on public.inventory_usage;
 create policy "own rows" on public.inventory_usage for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists "own rows" on public.fixed_expenses;
 create policy "own rows" on public.fixed_expenses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.fixed_expense_history;
+create policy "own rows" on public.fixed_expense_history for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ---------- Storage bucket for per-project logos (used in-app and in printed reports) ----------
 

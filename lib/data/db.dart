@@ -586,17 +586,36 @@ class AppDatabase {
   /// A fixed expense applies to [month] if it had already started
   /// (start_month <= month) and hasn't ended yet (end_month is null or is
   /// on/after month). Ending an expense (instead of deleting it) is what
-  /// keeps every past month's report exactly as it was.
+  /// keeps every past month's report exactly as it was. Also includes any
+  /// frozen historical amounts left behind by permanently-deleted expenses
+  /// (see permanently_delete_fixed_expense) for that exact month.
   Future<double> fixedExpensesForMonth(int projectId, String month) async {
-    final rows = await _c
+    final live = await _c
         .from('fixed_expenses')
         .select('monthly_amount')
         .eq('project_id', projectId)
         .lte('start_month', month)
         .or('end_month.is.null,end_month.gte.$month');
-    return (rows as List).fold<double>(
+    final liveTotal = (live as List).fold<double>(
         0.0, (s, r) => s + (r['monthly_amount'] as num).toDouble());
+
+    final historical = await _c
+        .from('fixed_expense_history')
+        .select('amount')
+        .eq('project_id', projectId)
+        .eq('month', month);
+    final historicalTotal = (historical as List)
+        .fold<double>(0.0, (s, r) => s + (r['amount'] as num).toDouble());
+
+    return liveTotal + historicalTotal;
   }
+
+  /// Permanently deletes a fixed expense — safe even if it already applied
+  /// to past months: those months' amounts get frozen into
+  /// fixed_expense_history first (see supabase_schema.sql), so old reports
+  /// never change. Only use this from the "ended expenses" list.
+  Future<void> permanentlyDeleteFixedExpense(int expenseId) async => _c.rpc(
+      'permanently_delete_fixed_expense', params: {'p_expense_id': expenseId});
 
   // ---------------- Reports ----------------
 

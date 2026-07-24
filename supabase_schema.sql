@@ -182,6 +182,19 @@ create table if not exists public.fixed_expense_history (
   amount numeric not null
 );
 
+-- One-time foundational expenses for a project (car, equipment...), kept
+-- completely separate from day-to-day daily_expenses so they don't get
+-- lost in the regular monthly numbers. Used by the "Project Overview" screen.
+create table if not exists public.initial_investments (
+  id bigint generated always as identity primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  project_id bigint not null references public.projects(id) on delete cascade,
+  name text not null,
+  amount numeric not null,
+  date text not null,
+  notes text not null default ''
+);
+
 -- Atomically records inventory usage AND increases the item's used_quantity
 -- (mirrors what a single local transaction used to do). The item's unit
 -- cost (purchase_price / purchase_quantity) is snapshotted into unit_cost
@@ -488,6 +501,7 @@ alter table public.inventory_items enable row level security;
 alter table public.inventory_usage enable row level security;
 alter table public.fixed_expenses enable row level security;
 alter table public.fixed_expense_history enable row level security;
+alter table public.initial_investments enable row level security;
 
 drop policy if exists "own rows" on public.projects;
 create policy "own rows" on public.projects for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -509,6 +523,8 @@ drop policy if exists "own rows" on public.fixed_expenses;
 create policy "own rows" on public.fixed_expenses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists "own rows" on public.fixed_expense_history;
 create policy "own rows" on public.fixed_expense_history for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "own rows" on public.initial_investments;
+create policy "own rows" on public.initial_investments for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ---------- Storage bucket for per-project logos (used in-app and in printed reports) ----------
 

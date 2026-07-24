@@ -6,6 +6,7 @@ import '../data/db.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'daily_records_screen.dart';
+import 'project_overview_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final Project project;
@@ -57,6 +58,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.project.name),
+        actions: [
+          IconButton(
+            tooltip: t('projectOverview'),
+            icon: const Icon(Icons.assessment_outlined),
+            onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) =>
+                        ProjectOverviewScreen(project: widget.project))),
+          ),
+        ],
       ),
       body: _loading || r == null
           ? const Center(child: CircularProgressIndicator())

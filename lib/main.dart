@@ -8,6 +8,7 @@ import 'core/localization.dart';
 import 'core/supabase_config.dart';
 import 'screens/auth_screen.dart';
 import 'screens/projects_screen.dart';
+import 'screens/reset_password_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,15 +52,32 @@ class BusinessDashboardApp extends StatelessWidget {
 }
 
 /// Shows the sign-in screen when signed out, and the dashboard itself once
-/// signed in — reacts live to sign-in/sign-out events.
-class AuthGate extends StatelessWidget {
+/// signed in — reacts live to sign-in/sign-out events. Also detects the
+/// special "password recovery" session created when the user clicks the
+/// reset link from their email, and shows a dedicated screen to set a new
+/// password before letting them into the app.
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _recovering = false;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AuthState>(
       stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
+        if (snapshot.data?.event == AuthChangeEvent.passwordRecovery) {
+          _recovering = true;
+        }
+        if (_recovering) {
+          return ResetPasswordScreen(
+              onDone: () => setState(() => _recovering = false));
+        }
         final session = Supabase.instance.client.auth.currentSession;
         return session == null ? const AuthScreen() : const ProjectsScreen();
       },

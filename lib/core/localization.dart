@@ -175,6 +175,26 @@ class L10n {
     'signIn': {'ar': 'تسجيل الدخول', 'en': 'Sign in'},
     'createAccount': {'ar': 'إنشاء حساب', 'en': 'Create account'},
     'signInSubtitle': {'ar': 'سجّل دخولك عشان توصل لبياناتك', 'en': 'Sign in to access your data'},
+    'forgotPassword': {'ar': 'نسيت كلمة المرور؟', 'en': 'Forgot password?'},
+    'forgotPasswordSubtitle': {
+      'ar': 'اكتب إيميلك ونرسل لك رابط لتعيين كلمة مرور جديدة',
+      'en': 'Enter your email and we\'ll send you a link to set a new password'
+    },
+    'sendResetLink': {'ar': 'إرسال رابط الاستعادة', 'en': 'Send reset link'},
+    'resetLinkSent': {
+      'ar': 'تم إرسال رابط الاستعادة — تحقق من بريدك الإلكتروني',
+      'en': 'Reset link sent — check your email'
+    },
+    'backToSignIn': {'ar': 'رجوع لتسجيل الدخول', 'en': 'Back to sign in'},
+    'setNewPassword': {'ar': 'تعيين كلمة مرور جديدة', 'en': 'Set a new password'},
+    'setNewPasswordSubtitle': {
+      'ar': 'اكتب كلمة مرور جديدة لحسابك',
+      'en': 'Enter a new password for your account'
+    },
+    'newPassword': {'ar': 'كلمة المرور الجديدة', 'en': 'New password'},
+    'confirmPassword': {'ar': 'تأكيد كلمة المرور', 'en': 'Confirm password'},
+    'passwordsDoNotMatch': {'ar': 'كلمتا المرور غير متطابقتين', 'en': 'Passwords do not match'},
+    'saveNewPassword': {'ar': 'حفظ كلمة المرور', 'en': 'Save password'},
     'createAccountSubtitle': {'ar': 'أنشئ حساب جديد للبدء', 'en': 'Create a new account to get started'},
     'haveAccountSignIn': {'ar': 'عندك حساب؟ سجّل الدخول', 'en': 'Already have an account? Sign in'},
     'noAccountSignUp': {'ar': 'ما عندك حساب؟ أنشئ واحد', 'en': "Don't have an account? Sign up"},
@@ -315,6 +335,22 @@ class L10n {
       'en': 'Use this only if you added the expense by mistake. This delete is complete and permanent — any effect it had on past reports is erased entirely (not preserved). If the expense was genuinely active for a while and you want past report figures to stay intact, use "Delete permanently" instead.'
     },
     'deletedCompletely': {'ar': 'تم الحذف الكامل', 'en': 'Deleted completely'},
+
+    // Project Overview (all-time income vs. all expenses since day one)
+    'projectOverview': {'ar': 'نظرة عامة على المشروع', 'en': 'Project Overview'},
+    'initialInvestments': {'ar': 'مصروفات التأسيس', 'en': 'Setup expenses'},
+    'addInitialInvestment': {'ar': 'تأسيس المشروع', 'en': 'Project setup'},
+    'noInitialInvestments': {
+      'ar': 'ما فيه مصروفات تأسيس مسجّلة',
+      'en': 'No setup expenses recorded'
+    },
+    'totalEarned': {'ar': 'إجمالي الدخل (منذ البداية)', 'en': 'Total earned (since day one)'},
+    'totalSpent': {'ar': 'إجمالي المصروفات (منذ البداية)', 'en': 'Total spent (since day one)'},
+    'setupExpenses': {'ar': 'مصروفات التأسيس', 'en': 'Setup expenses'},
+    'operatingExpenses': {'ar': 'مصروفات التشغيل', 'en': 'Operating expenses'},
+    'netAllTime': {'ar': 'صافي الربح منذ البداية', 'en': 'Net profit since day one'},
+    'sinceProjectStart': {'ar': 'منذ إنشاء المشروع', 'en': 'Since project start'},
+    'investmentName': {'ar': 'اسم المصروف', 'en': 'Expense name'},
     'linkToProductCostFailed': {
       'ar': 'تعذّر الربط — يوجد صنف بنفس الاسم بقائمة تكلفة المنتجات المستخدمة مسبقًا. غيّر اسم صنف المخزون أو اربطه يدويًا لاحقًا بعد حل التعارض.',
       'en': 'Couldn\'t link — a product with this name already exists in "cost of products used". Rename the inventory item, or resolve the conflict and link it manually later.'

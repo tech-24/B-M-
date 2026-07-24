@@ -437,6 +437,47 @@ class MonthlyReport {
   double get profitPercent => totalSales <= 0 ? 0 : (netProfit / totalSales) * 100;
 }
 
+/// A one-time foundational expense (car, equipment...) for a project —
+/// tracked completely separately from daily_expenses. Used by the
+/// "Project Overview" screen to show total initial investment vs.
+/// accumulated profit since the project started.
+class InitialInvestment {
+  final int? id;
+  final int projectId;
+  final String name;
+  final double amount;
+  final String date; // yyyy-MM-dd
+  final String notes;
+
+  InitialInvestment({
+    this.id,
+    required this.projectId,
+    required this.name,
+    required this.amount,
+    required this.date,
+    this.notes = '',
+  });
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'project_id': projectId,
+        'name': name,
+        'amount': amount,
+        'date': date,
+        'notes': notes,
+      };
+
+  factory InitialInvestment.fromMap(Map<String, dynamic> m) =>
+      InitialInvestment(
+        id: m['id'] as int?,
+        projectId: m['project_id'] as int,
+        name: m['name'] as String,
+        amount: (m['amount'] as num).toDouble(),
+        date: m['date'] as String,
+        notes: (m['notes'] ?? '') as String,
+      );
+}
+
 /// One row in the printed report's inventory breakdown: how much of an
 /// item was consumed (and its cost) during the report period, plus how
 /// much is left right now (at print time).

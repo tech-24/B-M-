@@ -674,6 +674,39 @@ class AppDatabase {
     );
   }
 
+  // ---------------- Initial investments (Project Overview) ----------------
+
+  Future<List<InitialInvestment>> getInitialInvestments(int projectId) async {
+    final rows = await _c
+        .from('initial_investments')
+        .select()
+        .eq('project_id', projectId)
+        .order('date', ascending: false);
+    return (rows as List).map((r) => InitialInvestment.fromMap(r)).toList();
+  }
+
+  Future<void> insertInitialInvestment(InitialInvestment i) async {
+    await _c.from('initial_investments').insert({
+      'project_id': i.projectId,
+      'name': i.name,
+      'amount': i.amount,
+      'date': i.date,
+      'notes': i.notes,
+    });
+  }
+
+  Future<void> updateInitialInvestment(InitialInvestment i) async {
+    await _c.from('initial_investments').update({
+      'name': i.name,
+      'amount': i.amount,
+      'date': i.date,
+      'notes': i.notes,
+    }).eq('id', i.id as Object);
+  }
+
+  Future<void> deleteInitialInvestment(int id) async =>
+      _c.from('initial_investments').delete().eq('id', id);
+
   /// Reports for the 12 months of [year] (e.g. 2026). All 12 months are
   /// fetched in parallel instead of one-by-one to keep this fast.
   Future<List<MonthlyReport>> yearlyReports(int projectId, int year) async {

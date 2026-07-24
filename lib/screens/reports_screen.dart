@@ -157,7 +157,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     Uint8List? bytes;
     try {
-      final report = await _db.rangeReport(widget.project.id!, start, end);
+      final results = await Future.wait([
+        _db.rangeReport(widget.project.id!, start, end),
+        _db.inventoryBreakdownForRange(widget.project.id!, start, end),
+      ]);
+      final report = results[0] as PeriodReport;
+      final inventoryRows = results[1] as List<InventoryBreakdownRow>;
 
       Uint8List? logoBytes;
       final logoUrl = widget.project.logoUrl;
@@ -191,8 +196,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
           'inventoryConsumption': t('inventoryConsumption'),
           'dailyExpenses': t('dailyExpenses'),
           'fixedExpenses': t('fixedExpenses'),
+          'inventoryBreakdown': t('inventoryBreakdown'),
+          'consumedQty': t('consumedQty'),
+          'remainingNow': t('remainingNow'),
+          'itemName': t('itemName'),
         },
         logoBytes: logoBytes,
+        inventoryRows: inventoryRows,
       );
     } catch (e) {
       // Close the "preparing" dialog exactly once, then stop — do NOT fall

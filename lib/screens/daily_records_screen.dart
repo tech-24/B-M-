@@ -177,7 +177,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
   double get _sales => parseNum(_salesCtl.text.replaceAll(',', ''));
   double get _productCost => _usage.fold<double>(
-      0.0, (s, u) => s + u.quantity * (_itemCost[u.itemId] ?? 0));
+      0.0, (s, u) => s + u.quantity * (u.unitCost ?? (_itemCost[u.itemId] ?? 0)));
   double get _expTotal =>
       _expenses.fold<double>(0.0, (s, e) => s + e.amount);
   double get _dailyProfit => _sales - _productCost - _expTotal;
@@ -429,7 +429,8 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                             (it) => it.id == u.itemId,
                             orElse: () => CostItem(
                                 projectId: widget.project.id!, name: '—'));
-                        final cost = u.quantity * (_itemCost[u.itemId] ?? 0);
+                        final cost =
+                            u.quantity * (u.unitCost ?? (_itemCost[u.itemId] ?? 0));
                         return ListTile(
                           dense: true,
                           title: Text(item.name),

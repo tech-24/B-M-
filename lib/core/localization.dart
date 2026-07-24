@@ -48,7 +48,7 @@ class L10n {
     'addExpense': {'ar': 'إضافة مصروف', 'en': 'Add expense'},
     'addInventoryItem': {'ar': 'إضافة صنف', 'en': 'Add item'},
     'viewReports': {'ar': 'عرض التقارير', 'en': 'View reports'},
-    'operatingCost': {'ar': 'تكلفة التشغيل', 'en': 'Operating Cost'},
+    'operatingCost': {'ar': 'تكلفة المنتجات المستخدمة', 'en': 'Cost of Products Used'},
     'costHistory': {'ar': 'سجل التكاليف الشهرية', 'en': 'Monthly cost history'},
     'costPerUnit': {'ar': 'تكلفة الوحدة', 'en': 'Cost per unit'},
     'addCostItem': {'ar': 'إضافة صنف تكلفة', 'en': 'Add cost item'},
@@ -95,7 +95,7 @@ class L10n {
     'salesAmount': {'ar': 'مبلغ المبيعات', 'en': 'Sales amount'},
     'usage': {'ar': 'الاستخدام', 'en': 'Usage'},
     'usedQuantity': {'ar': 'الكمية المستخدمة', 'en': 'Quantity used'},
-    'productCost': {'ar': 'تكلفة المنتج', 'en': 'Product cost'},
+    'productCost': {'ar': 'تكلفة المنتجات المستخدمة', 'en': 'Cost of products used'},
     'dailyExpenses': {'ar': 'المصاريف اليومية', 'en': 'Daily expenses'},
     'fixedExpenses': {'ar': 'المصاريف الثابتة', 'en': 'Fixed expenses'},
     'dailyResult': {'ar': 'نتيجة اليوم', 'en': 'Daily result'},
@@ -234,6 +234,94 @@ class L10n {
       'ar': 'الاسم غير مطابق',
       'en': 'Name does not match'
     },
+
+    // Archiving cost/inventory items instead of hard-deleting them
+    'archived': {'ar': 'مؤرشف', 'en': 'Archived'},
+    'archivedItems': {'ar': 'أصناف مؤرشفة', 'en': 'Archived items'},
+    'restore': {'ar': 'استعادة', 'en': 'Restore'},
+    'itemArchivedNotice': {
+      'ar': 'هذا الصنف له سجل استخدام سابق، فتم أرشفته بدل حذفه — عشان تقارير الأشهر الماضية تفضل صحيحة. تقدر تستعيده بأي وقت.',
+      'en': 'This item has past usage history, so it was archived instead of deleted — to keep past months\' reports accurate. You can restore it anytime.'
+    },
+    'confirmDeleteNoHistory': {
+      'ar': 'ما له أي سجل استخدام، بيُحذف نهائيًا. متأكد؟',
+      'en': 'It has no usage history, so it will be permanently deleted. Are you sure?'
+    },
+
+    // Ending (vs deleting) a fixed expense
+    'endExpense': {'ar': 'إنهاء المصروف', 'en': 'End expense'},
+    'endExpenseConfirm': {
+      'ar': 'بينتهي هذا المصروف بعد الشهر الحالي — الأشهر السابقة والحالي تفضل محسوبة زي ما هي.',
+      'en': 'This expense will stop after the current month — past and current months stay calculated exactly as they are.'
+    },
+    'reactivateExpense': {'ar': 'إعادة تفعيل', 'en': 'Reactivate'},
+    'deleteForever': {'ar': 'حذف نهائي', 'en': 'Delete permanently'},
+    'deleteFixedWarning': {
+      'ar': 'هذا المصروف بدأ من شهر سابق أو الحالي — حذفه نهائيًا بيغيّر أرباح تلك الأشهر بأثر رجعي. الأفضل تستخدم "إنهاء المصروف" بدلًا من الحذف. متأكد تبي تحذفه نهائيًا؟',
+      'en': 'This expense already started in a past or current month — deleting it permanently will retroactively change those months\' profit. Consider "End expense" instead. Are you sure you want to permanently delete it?'
+    },
+    'endedSince': {'ar': 'انتهى بعد', 'en': 'Ended after'},
+
+    // Inventory unit types
+    'unit': {'ar': 'اسم الوحدة (يظهر بالواجهة)', 'en': 'Unit label (shown in UI)'},
+    'unitPiece': {'ar': 'حبة', 'en': 'Piece'},
+    'unitCarton': {'ar': 'كرتون', 'en': 'Carton'},
+    'unitKg': {'ar': 'كيلو', 'en': 'Kg'},
+    'unitOther': {'ar': 'أخرى', 'en': 'Other'},
+    'unitsPerContainer': {'ar': 'كم حبة بالوحدة الواحدة؟', 'en': 'How many pieces per unit?'},
+    'hasSubUnits': {'ar': 'هل تحتوي على عدد وحدات أصغر؟', 'en': 'Does it contain smaller sub-units?'},
+    'containerCount': {'ar': 'الكمية المشتراة', 'en': 'Quantity purchased'},
+    'pricePerContainer': {'ar': 'سعر الوحدة الواحدة', 'en': 'Price per unit'},
+    'totalPieces': {'ar': 'الإجمالي بالحبة', 'en': 'Total in pieces'},
+    'pricePerPiece': {'ar': 'سعر الحبة الواحدة', 'en': 'Price per piece'},
+
+    // Linking inventory to "cost of products used"
+    'linkToProductCost': {
+      'ar': 'تبي تضيفه لتكلفة المنتجات المستخدمة؟',
+      'en': 'Add it to cost of products used?'
+    },
+    'linkToProductCostHint': {
+      'ar': 'اختر "نعم" إذا كان بالإمكان تحديد الكمية المباعة من هذا المنتج بدقة في كل عملية بيع (مثل المشروبات الغازية أو العصائر)، وسيتم عندها خصم الكمية من المخزون تلقائيًا مع كل عملية بيع.\n\nاختر "لا" إذا تعذّر تتبع استهلاك هذا الصنف بدقة (بسبب التلف أو كثرة الكمية التي يصعب حصرها). في هذه الحالة يمكن استخدام خيار "استُخدم بالكامل" في نهاية الفترة، أو تسجيل قيمته كمصروف يومي مباشر بدلًا من إدارته عبر المخزون.',
+      'en': 'Choose "Yes" if the quantity sold of this product can be determined precisely with each sale (e.g. soft drinks or juices); the quantity will then be deducted from inventory automatically with every sale.\n\nChoose "No" if this item\'s usage cannot be tracked precisely (due to waste or a quantity too large to count). In that case, use "Used up completely" at the end of the period, or record its value as a direct daily expense instead of managing it through inventory.'
+    },
+    'consumptionPerUnit': {
+      'ar': 'كم يستهلك من المخزون كل وحدة تباع؟',
+      'en': 'How much inventory does each unit sold consume?'
+    },
+    'linkedToInventory': {'ar': 'مرتبط بمخزون', 'en': 'Linked to inventory'},
+    'priceAutoFromInventory': {
+      'ar': 'السعر يتحدث تلقائيًا من سعر المخزون',
+      'en': 'Price updates automatically from inventory price'
+    },
+    'unlinkFromInventory': {'ar': 'فك الربط', 'en': 'Unlink'},
+    'editConsumptionRatio': {'ar': 'تعديل نسبة الاستهلاك', 'en': 'Edit consumption ratio'},
+    'ratioUpdated': {'ar': 'تم تحديث النسبة', 'en': 'Ratio updated'},
+    'restock': {'ar': 'إعادة تعبئة', 'en': 'Restock'},
+    'restockHint': {
+      'ar': 'أدخل الدفعة الجديدة اللي اشتريتها الحين، وبنضيفها فوق رصيدك الحالي تلقائيًا — الاستهلاك السابق يفضل بسعره القديم بدون تغيير.',
+      'en': 'Enter the new batch you just bought — it\'s added on top of your current stock automatically. Past usage keeps its old price unchanged.'
+    },
+    'restocked': {'ar': 'تمت إعادة التعبئة', 'en': 'Restocked'},
+    'linkToProductCostFailed': {
+      'ar': 'تعذّر الربط — يوجد صنف بنفس الاسم بقائمة تكلفة المنتجات المستخدمة مسبقًا. غيّر اسم صنف المخزون أو اربطه يدويًا لاحقًا بعد حل التعارض.',
+      'en': 'Couldn\'t link — a product with this name already exists in "cost of products used". Rename the inventory item, or resolve the conflict and link it manually later.'
+    },
+    'unlinkConfirm': {
+      'ar': 'بيتوقف الخصم التلقائي من المخزون لهذا المنتج، وسعره القادم يصير صفر لين تحدد له سعر شهري يدوي من صفحته.',
+      'en': 'Automatic inventory deduction for this product will stop, and its future cost will be zero until you set a manual monthly price from its page.'
+    },
+
+    // Mark inventory item fully used
+    'useAllRemaining': {'ar': 'استُخدم بالكامل', 'en': 'Used up completely'},
+    'useAllRemainingConfirm': {
+      'ar': 'بيتم تسجيل استهلاك الكمية المتبقية بالكامل. متأكد؟',
+      'en': 'This will record usage of all remaining stock. Are you sure?'
+    },
+
+    // Printed report inventory breakdown
+    'inventoryBreakdown': {'ar': 'تفاصيل المخزون', 'en': 'Inventory breakdown'},
+    'consumedQty': {'ar': 'المستهلك', 'en': 'Consumed'},
+    'remainingNow': {'ar': 'المتبقي حاليًا', 'en': 'Remaining now'},
   };
 
   String t(String key) => _s[key]?[locale.languageCode] ?? key;

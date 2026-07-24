@@ -197,6 +197,34 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     _load();
   }
 
+  Future<void> _endFixed(FixedExpense e) async {
+    final t = L10n.of(context).t;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('endExpense')),
+        content: Text(t('endExpenseConfirm')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t('cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t('endExpense'))),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _db.updateFixedExpense(e.copyWith(endMonth: currentMonthStr()));
+      _load();
+    }
+  }
+
+  Future<void> _reactivateFixed(FixedExpense e) async {
+    await _db.updateFixedExpense(e.copyWith(clearEndMonth: true));
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = L10n.of(context).t;
@@ -313,7 +341,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   Widget _fixedTab() {
     final t = L10n.of(context).t;
-    final total = _fixed.fold(0.0, (s, e) => s + e.monthlyAmount);
+    final month = currentMonthStr();
+    final total = _fixed
+        .where((e) =>
+            e.startMonth.compareTo(month) <= 0 &&
+            (e.endMonth == null || e.endMonth!.compareTo(month) >= 0))
+        .fold(0.0, (s, e) => s + e.monthlyAmount);
     return _fixed.isEmpty
         ? EmptyState(icon: Icons.home_work_outlined, message: t('noExpenses'))
         : ListView(
@@ -332,19 +365,40 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ..._fixed.map((e) => Card(
                     margin: const EdgeInsets.only(bottom: 8),
                     child: ListTile(
-                      leading: const Icon(Icons.home_work_outlined),
-                      title: Text(e.name),
-                      subtitle: e.notes.isEmpty ? null : Text(e.notes),
+                      leading: Icon(Icons.home_work_outlined,
+                          color: e.isEnded
+                              ? Theme.of(context).hintColor
+                              : null),
+                      title: Text(e.name,
+                          style: e.isEnded
+                              ? TextStyle(
+                                  color: Theme.of(context).hintColor,
+                                  decoration: TextDecoration.lineThrough)
+                              : null),
+                      subtitle: Text([
+                        if (e.notes.isNotEmpty) e.notes,
+                        if (e.isEnded)
+                          '${t('endedSince')} ${monthLabel(context, e.endMonth!)}',
+                      ].join(' • ')),
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                         Text(fmtMoney(context, e.monthlyAmount),
                             style: const TextStyle(
                                 fontWeight: FontWeight.w700)),
-                        IconButton(
-                            icon: const Icon(Icons.delete_outline, size: 20),
-                            onPressed: () async {
-                              await _db.deleteFixedExpense(e.id!);
-                              _load();
-                            }),
+                        PopupMenuButton<String>(
+                          onSelected: (v) {
+                            if (v == 'end') _endFixed(e);
+                            if (v == 'reactivate') _reactivateFixed(e);
+                          },
+                          itemBuilder: (_) => [
+                            if (!e.isEnded)
+                              PopupMenuItem(
+                                  value: 'end', child: Text(t('endExpense')))
+                            else
+                              PopupMenuItem(
+                                  value: 'reactivate',
+                                  child: Text(t('reactivateExpense'))),
+                          ],
+                        ),
                       ]),
                       onTap: () => _editFixed(existing: e),
                     ),

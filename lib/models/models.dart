@@ -88,19 +88,41 @@ class CostItem {
   final int? id;
   final int projectId;
   final String name;
+  final bool archived;
+  /// If set, this product is linked to an inventory item: selling it
+  /// auto-deducts stock and its price comes from the inventory price.
+  final int? linkedInventoryItemId;
+  /// How much of the linked inventory item (in pieces) one unit sold
+  /// consumes. Only meaningful when [linkedInventoryItemId] is set.
+  final double? consumptionPerUnit;
 
-  CostItem({this.id, required this.projectId, required this.name});
+  CostItem({
+    this.id,
+    required this.projectId,
+    required this.name,
+    this.archived = false,
+    this.linkedInventoryItemId,
+    this.consumptionPerUnit,
+  });
+
+  bool get isLinked => linkedInventoryItemId != null;
 
   Map<String, dynamic> toMap() => {
         'id': id,
         'project_id': projectId,
         'name': name,
+        'archived': archived,
+        'linked_inventory_item_id': linkedInventoryItemId,
+        'consumption_per_unit': consumptionPerUnit,
       };
 
   factory CostItem.fromMap(Map<String, dynamic> m) => CostItem(
         id: m['id'] as int?,
         projectId: m['project_id'] as int,
         name: m['name'] as String,
+        archived: (m['archived'] ?? false) as bool,
+        linkedInventoryItemId: m['linked_inventory_item_id'] as int?,
+        consumptionPerUnit: (m['consumption_per_unit'] as num?)?.toDouble(),
       );
 }
 
@@ -144,6 +166,10 @@ class CostUsage {
   final int itemId;
   final String date; // yyyy-MM-dd
   final double quantity;
+  /// Locked-in per-unit cost, set only when this item is linked to an
+  /// inventory item (derived from that item's price at the time of sale).
+  /// Null for unlinked items (their cost comes from monthly CostEntry).
+  final double? unitCost;
 
   CostUsage({
     this.id,
@@ -151,6 +177,7 @@ class CostUsage {
     required this.itemId,
     required this.date,
     required this.quantity,
+    this.unitCost,
   });
 
   Map<String, dynamic> toMap() => {
@@ -159,6 +186,7 @@ class CostUsage {
         'item_id': itemId,
         'date': date,
         'quantity': quantity,
+        'unit_cost': unitCost,
       };
 
   factory CostUsage.fromMap(Map<String, dynamic> m) => CostUsage(
@@ -167,6 +195,7 @@ class CostUsage {
         itemId: m['item_id'] as int,
         date: m['date'] as String,
         quantity: (m['quantity'] as num).toDouble(),
+        unitCost: (m['unit_cost'] as num?)?.toDouble(),
       );
 }
 
@@ -215,6 +244,14 @@ class InventoryItem {
   final double purchaseQuantity;
   final double purchasePrice; // total price of the purchased quantity
   final double usedQuantity;
+  final bool archived;
+  /// One of 'piece', 'carton', 'kg', 'other'. Purely informational —
+  /// purchaseQuantity/purchasePrice are always stored as totals in pieces
+  /// (or kg), the UI just helps convert carton-style entry into that.
+  final String unitType;
+  /// For 'carton'/'other'-with-subunits: how many pieces are in one unit
+  /// of purchaseQuantity. Null when not applicable (piece/kg/other-plain).
+  final double? unitsPerContainer;
 
   InventoryItem({
     this.id,
@@ -225,6 +262,9 @@ class InventoryItem {
     required this.purchaseQuantity,
     required this.purchasePrice,
     this.usedQuantity = 0,
+    this.archived = false,
+    this.unitType = 'piece',
+    this.unitsPerContainer,
   });
 
   double get remaining => (purchaseQuantity - usedQuantity).clamp(0, double.infinity);
@@ -240,6 +280,9 @@ class InventoryItem {
         'purchase_quantity': purchaseQuantity,
         'purchase_price': purchasePrice,
         'used_quantity': usedQuantity,
+        'archived': archived,
+        'unit_type': unitType,
+        'units_per_container': unitsPerContainer,
       };
 
   factory InventoryItem.fromMap(Map<String, dynamic> m) => InventoryItem(
@@ -251,6 +294,9 @@ class InventoryItem {
         purchaseQuantity: (m['purchase_quantity'] as num).toDouble(),
         purchasePrice: (m['purchase_price'] as num).toDouble(),
         usedQuantity: (m['used_quantity'] as num?)?.toDouble() ?? 0,
+        archived: (m['archived'] ?? false) as bool,
+        unitType: (m['unit_type'] ?? 'piece') as String,
+        unitsPerContainer: (m['units_per_container'] as num?)?.toDouble(),
       );
 }
 
@@ -260,6 +306,10 @@ class InventoryUsage {
   final int itemId;
   final String date; // yyyy-MM-dd
   final double quantity;
+  /// Unit cost locked in at the moment this usage was recorded (so a later
+  /// price change on the item never rewrites the cost of past days). Null
+  /// only for rows recorded before this field existed.
+  final double? unitCost;
 
   InventoryUsage({
     this.id,
@@ -267,6 +317,7 @@ class InventoryUsage {
     required this.itemId,
     required this.date,
     required this.quantity,
+    this.unitCost,
   });
 
   Map<String, dynamic> toMap() => {
@@ -275,6 +326,7 @@ class InventoryUsage {
         'item_id': itemId,
         'date': date,
         'quantity': quantity,
+        'unit_cost': unitCost,
       };
 
   factory InventoryUsage.fromMap(Map<String, dynamic> m) => InventoryUsage(
@@ -283,6 +335,7 @@ class InventoryUsage {
         itemId: m['item_id'] as int,
         date: m['date'] as String,
         quantity: (m['quantity'] as num).toDouble(),
+        unitCost: (m['unit_cost'] as num?)?.toDouble(),
       );
 }
 
@@ -292,6 +345,10 @@ class FixedExpense {
   final String name;
   final double monthlyAmount;
   final String startMonth; // yyyy-MM (applies from this month onward)
+  /// yyyy-MM, inclusive last month this expense applies to. Null = still
+  /// ongoing. Ending an expense (instead of deleting it) keeps every past
+  /// month's report exactly as it was.
+  final String? endMonth;
   final String notes;
 
   FixedExpense({
@@ -300,8 +357,22 @@ class FixedExpense {
     required this.name,
     required this.monthlyAmount,
     required this.startMonth,
+    this.endMonth,
     this.notes = '',
   });
+
+  bool get isEnded => endMonth != null;
+
+  FixedExpense copyWith({String? endMonth, bool clearEndMonth = false}) =>
+      FixedExpense(
+        id: id,
+        projectId: projectId,
+        name: name,
+        monthlyAmount: monthlyAmount,
+        startMonth: startMonth,
+        endMonth: clearEndMonth ? null : (endMonth ?? this.endMonth),
+        notes: notes,
+      );
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -309,6 +380,7 @@ class FixedExpense {
         'name': name,
         'monthly_amount': monthlyAmount,
         'start_month': startMonth,
+        'end_month': endMonth,
         'notes': notes,
       };
 
@@ -318,6 +390,7 @@ class FixedExpense {
         name: m['name'] as String,
         monthlyAmount: (m['monthly_amount'] as num).toDouble(),
         startMonth: (m['start_month'] ?? '') as String,
+        endMonth: m['end_month'] as String?,
         notes: (m['notes'] ?? '') as String,
       );
 }
@@ -345,6 +418,25 @@ class MonthlyReport {
   double get netProfit =>
       totalSales - productCost - dailyExpenses - inventoryConsumption - fixedExpenses;
   double get profitPercent => totalSales <= 0 ? 0 : (netProfit / totalSales) * 100;
+}
+
+/// One row in the printed report's inventory breakdown: how much of an
+/// item was consumed (and its cost) during the report period, plus how
+/// much is left right now (at print time).
+class InventoryBreakdownRow {
+  final String name;
+  final String unit;
+  final double consumedQty;
+  final double cost;
+  final double remainingNow;
+
+  InventoryBreakdownRow({
+    required this.name,
+    required this.unit,
+    required this.consumedQty,
+    required this.cost,
+    required this.remainingNow,
+  });
 }
 
 /// Aggregated report for an arbitrary custom date range (used by the

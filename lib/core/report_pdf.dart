@@ -20,6 +20,7 @@ Future<Uint8List> buildPeriodReportPdf({
   required String Function(double) money,
   required Map<String, String> labels,
   Uint8List? logoBytes,
+  List<InventoryBreakdownRow> inventoryRows = const [],
 }) async {
   final doc = pw.Document();
 
@@ -31,7 +32,6 @@ Future<Uint8List> buildPeriodReportPdf({
       : await PdfGoogleFonts.notoSansBold();
 
   final textDirection = isArabic ? pw.TextDirection.rtl : pw.TextDirection.ltr;
-  final align = isArabic ? pw.TextAlign.right : pw.TextAlign.left;
   final crossAlign =
       isArabic ? pw.CrossAxisAlignment.end : pw.CrossAxisAlignment.start;
 
@@ -63,104 +63,151 @@ Future<Uint8List> buildPeriodReportPdf({
   }
 
   doc.addPage(
-    pw.Page(
+    pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
       textDirection: textDirection,
       margin: const pw.EdgeInsets.all(32),
-      build: (context) {
-        return pw.Column(
-          crossAxisAlignment: crossAlign,
+      footer: (context) => pw.Column(children: [
+        pw.Divider(color: PdfColors.grey200),
+        pw.SizedBox(height: 6),
+        pw.Text(generatedOnLabel,
+            style: pw.TextStyle(font: baseFont, fontSize: 9, color: grey)),
+      ]),
+      build: (context) => [
+        // Header: logo + project name + period
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
           children: [
-            // Header: logo + project name + period
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
+            pw.Column(
+              crossAxisAlignment: crossAlign,
               children: [
-                pw.Column(
-                  crossAxisAlignment: crossAlign,
-                  children: [
-                    pw.Text(projectName,
-                        style: pw.TextStyle(
-                            font: boldFont, fontSize: 20, color: primary)),
-                    pw.SizedBox(height: 4),
-                    pw.Text(periodLabel,
-                        style: pw.TextStyle(
-                            font: baseFont, fontSize: 12, color: grey)),
-                  ],
-                ),
-                if (logoBytes != null)
-                  pw.Container(
-                    width: 56,
-                    height: 56,
-                    decoration: pw.BoxDecoration(
-                      borderRadius: pw.BorderRadius.circular(10),
-                      image: pw.DecorationImage(
-                        image: pw.MemoryImage(logoBytes),
-                        fit: pw.BoxFit.cover,
-                      ),
-                    ),
-                  ),
+                pw.Text(projectName,
+                    style: pw.TextStyle(
+                        font: boldFont, fontSize: 20, color: primary)),
+                pw.SizedBox(height: 4),
+                pw.Text(periodLabel,
+                    style:
+                        pw.TextStyle(font: baseFont, fontSize: 12, color: grey)),
               ],
             ),
-            pw.SizedBox(height: 4),
-            pw.Divider(color: PdfColors.grey300),
-            pw.SizedBox(height: 18),
-
-            // Net profit hero
-            pw.Container(
-              width: double.infinity,
-              padding: const pw.EdgeInsets.all(16),
-              decoration: pw.BoxDecoration(
-                color: report.netProfit >= 0 ? goodLight : badLight,
-                borderRadius: pw.BorderRadius.circular(10),
-              ),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Column(
-                    crossAxisAlignment: crossAlign,
-                    children: [
-                      pw.Text(labels['netProfit']!,
-                          style: pw.TextStyle(font: baseFont, fontSize: 11, color: grey)),
-                      pw.SizedBox(height: 4),
-                      pw.Text(money(report.netProfit),
-                          style: pw.TextStyle(
-                              font: boldFont,
-                              fontSize: 22,
-                              color: report.netProfit >= 0 ? good : bad)),
-                    ],
+            if (logoBytes != null)
+              pw.Container(
+                width: 56,
+                height: 56,
+                decoration: pw.BoxDecoration(
+                  borderRadius: pw.BorderRadius.circular(10),
+                  image: pw.DecorationImage(
+                    image: pw.MemoryImage(logoBytes),
+                    fit: pw.BoxFit.cover,
                   ),
-                  pw.Text('${report.profitPercent.toStringAsFixed(1)}%',
+                ),
+              ),
+          ],
+        ),
+        pw.SizedBox(height: 4),
+        pw.Divider(color: PdfColors.grey300),
+        pw.SizedBox(height: 18),
+
+        // Net profit hero
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.all(16),
+          decoration: pw.BoxDecoration(
+            color: report.netProfit >= 0 ? goodLight : badLight,
+            borderRadius: pw.BorderRadius.circular(10),
+          ),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Column(
+                crossAxisAlignment: crossAlign,
+                children: [
+                  pw.Text(labels['netProfit']!,
+                      style: pw.TextStyle(
+                          font: baseFont, fontSize: 11, color: grey)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(money(report.netProfit),
                       style: pw.TextStyle(
                           font: boldFont,
-                          fontSize: 16,
+                          fontSize: 22,
                           color: report.netProfit >= 0 ? good : bad)),
                 ],
               ),
-            ),
-            pw.SizedBox(height: 22),
+              pw.Text('${report.profitPercent.toStringAsFixed(1)}%',
+                  style: pw.TextStyle(
+                      font: boldFont,
+                      fontSize: 16,
+                      color: report.netProfit >= 0 ? good : bad)),
+            ],
+          ),
+        ),
+        pw.SizedBox(height: 22),
 
-            // Breakdown
-            pw.Text(labels['breakdown']!,
-                style: pw.TextStyle(font: boldFont, fontSize: 14, color: primary)),
-            pw.SizedBox(height: 6),
-            row(labels['totalRevenue']!, report.totalSales, bold: true),
-            pw.Divider(color: PdfColors.grey200),
-            row(labels['productCost']!, report.productCost),
-            row(labels['inventoryConsumption']!, report.inventoryConsumption),
-            row(labels['dailyExpenses']!, report.dailyExpenses),
-            row(labels['fixedExpenses']!, report.fixedExpenses),
-            pw.Divider(color: PdfColors.grey300, thickness: 1),
-            row(labels['netProfit']!, report.netProfit, bold: true),
+        // Breakdown
+        pw.Text(labels['breakdown']!,
+            style: pw.TextStyle(font: boldFont, fontSize: 14, color: primary)),
+        pw.SizedBox(height: 6),
+        row(labels['totalRevenue']!, report.totalSales, bold: true),
+        pw.Divider(color: PdfColors.grey200),
+        row(labels['productCost']!, report.productCost),
+        row(labels['inventoryConsumption']!, report.inventoryConsumption),
+        row(labels['dailyExpenses']!, report.dailyExpenses),
+        row(labels['fixedExpenses']!, report.fixedExpenses),
+        pw.Divider(color: PdfColors.grey300, thickness: 1),
+        row(labels['netProfit']!, report.netProfit, bold: true),
 
-            pw.Spacer(),
-            pw.Divider(color: PdfColors.grey200),
-            pw.SizedBox(height: 6),
-            pw.Text(generatedOnLabel,
-                style: pw.TextStyle(font: baseFont, fontSize: 9, color: grey)),
-          ],
-        );
-      },
+        if (inventoryRows.isNotEmpty) ...[
+          pw.SizedBox(height: 26),
+          pw.Text(labels['inventoryBreakdown'] ?? '',
+              style:
+                  pw.TextStyle(font: boldFont, fontSize: 14, color: primary)),
+          pw.SizedBox(height: 8),
+          pw.Table(
+            border: pw.TableBorder(
+                horizontalInside: const pw.BorderSide(
+                    color: PdfColors.grey200, width: 0.5)),
+            columnWidths: const {
+              0: pw.FlexColumnWidth(2.2),
+              1: pw.FlexColumnWidth(1.3),
+              2: pw.FlexColumnWidth(1.5),
+              3: pw.FlexColumnWidth(1.5),
+            },
+            children: [
+              pw.TableRow(children: [
+                pw.Text(labels['itemName'] ?? '',
+                    style: pw.TextStyle(font: boldFont, fontSize: 10.5)),
+                pw.Text(labels['consumedQty'] ?? '',
+                    style: pw.TextStyle(font: boldFont, fontSize: 10.5),
+                    textAlign: pw.TextAlign.center),
+                pw.Text(labels['productCost'] ?? '',
+                    style: pw.TextStyle(font: boldFont, fontSize: 10.5),
+                    textAlign: pw.TextAlign.center),
+                pw.Text(labels['remainingNow'] ?? '',
+                    style: pw.TextStyle(font: boldFont, fontSize: 10.5),
+                    textAlign: pw.TextAlign.center),
+              ]),
+              for (final r in inventoryRows)
+                pw.TableRow(children: [
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 5),
+                    child: pw.Text(r.name,
+                        style: pw.TextStyle(font: baseFont, fontSize: 10)),
+                  ),
+                  pw.Text('${r.consumedQty.toStringAsFixed(1)} ${r.unit}',
+                      style: pw.TextStyle(font: baseFont, fontSize: 10),
+                      textAlign: pw.TextAlign.center),
+                  pw.Text(money(r.cost),
+                      style: pw.TextStyle(font: baseFont, fontSize: 10),
+                      textAlign: pw.TextAlign.center),
+                  pw.Text('${r.remainingNow.toStringAsFixed(1)} ${r.unit}',
+                      style: pw.TextStyle(font: baseFont, fontSize: 10),
+                      textAlign: pw.TextAlign.center),
+                ]),
+            ],
+          ),
+        ],
+      ],
     ),
   );
 

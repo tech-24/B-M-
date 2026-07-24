@@ -23,8 +23,18 @@ create table if not exists public.cost_items (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   project_id bigint not null references public.projects(id) on delete cascade,
   name text not null,
+  archived boolean not null default false,
   unique (project_id, name)
 );
+
+-- Run this if "cost_items" already existed: lets an item be archived
+-- (hidden from new-entry pickers) instead of hard-deleted, so its
+-- historical monthly costs/usage — and therefore past reports — are
+-- never wiped out just because you stopped using the item.
+alter table public.cost_items add column if not exists archived boolean not null default false;
+-- NOTE: linked_inventory_item_id / consumption_per_unit are added further
+-- down, AFTER the inventory_items table exists (a foreign key can't point
+-- to a table that isn't created yet).
 
 create table if not exists public.cost_history (
   id bigint generated always as identity primary key,
@@ -43,8 +53,14 @@ create table if not exists public.cost_usage (
   item_id bigint not null references public.cost_items(id) on delete cascade,
   date text not null,
   quantity numeric not null,
+  unit_cost numeric,
   unique (project_id, item_id, date)
 );
+
+-- Run this if "cost_usage" already existed: for products linked to
+-- inventory, this locks in the derived per-unit cost at the moment of the
+-- sale, so a later inventory price change never rewrites a past day.
+alter table public.cost_usage add column if not exists unit_cost numeric;
 
 create table if not exists public.daily_records (
   id bigint generated always as identity primary key,
@@ -74,8 +90,24 @@ create table if not exists public.inventory_items (
   unit text not null default '',
   purchase_quantity numeric not null,
   purchase_price numeric not null,
-  used_quantity numeric not null default 0
+  used_quantity numeric not null default 0,
+  archived boolean not null default false,
+  unit_type text not null default 'piece',
+  units_per_container numeric
 );
+
+-- Run this if "inventory_items" already existed: same archiving idea as
+-- cost_items above, applied to inventory items.
+alter table public.inventory_items add column if not exists archived boolean not null default false;
+alter table public.inventory_items add column if not exists unit_type text not null default 'piece';
+alter table public.inventory_items add column if not exists units_per_container numeric;
+
+-- Now that inventory_items exists, add the optional link from a cost item
+-- (a product you sell) to the inventory item it's made of, plus how much
+-- inventory (in pieces) each unit sold consumes. Selling it then
+-- auto-deducts stock, and its price is derived from the inventory price.
+alter table public.cost_items add column if not exists linked_inventory_item_id bigint references public.inventory_items(id) on delete set null;
+alter table public.cost_items add column if not exists consumption_per_unit numeric;
 
 create table if not exists public.inventory_usage (
   id bigint generated always as identity primary key,
@@ -83,8 +115,21 @@ create table if not exists public.inventory_usage (
   project_id bigint not null references public.projects(id) on delete cascade,
   item_id bigint not null references public.inventory_items(id) on delete cascade,
   date text not null,
-  quantity numeric not null
+  quantity numeric not null,
+  unit_cost numeric,
+  -- Set only for usage rows generated automatically from a linked cost-item
+  -- sale (see upsert_linked_cost_usage below). Null for manual entries.
+  source_cost_usage_id bigint references public.cost_usage(id) on delete set null
 );
+
+-- Run this if "inventory_usage" already existed before this fix: locks in
+-- the item's unit cost at the moment usage is recorded, so a later price
+-- change never rewrites the cost of days you already logged.
+alter table public.inventory_usage add column if not exists unit_cost numeric;
+alter table public.inventory_usage add column if not exists source_cost_usage_id bigint references public.cost_usage(id) on delete set null;
+create unique index if not exists idx_inventory_usage_source_cost_usage
+  on public.inventory_usage (source_cost_usage_id)
+  where source_cost_usage_id is not null;
 
 create table if not exists public.fixed_expenses (
   id bigint generated always as identity primary key,
@@ -93,20 +138,38 @@ create table if not exists public.fixed_expenses (
   name text not null,
   monthly_amount numeric not null,
   start_month text not null,
+  end_month text,
   notes text not null default ''
 );
 
+-- Run this if "fixed_expenses" already existed: lets an expense be "ended"
+-- (stops applying after end_month) instead of deleted, so past months that
+-- already counted it stay correct forever.
+alter table public.fixed_expenses add column if not exists end_month text;
+
 -- Atomically records inventory usage AND increases the item's used_quantity
--- (mirrors what a single local transaction used to do).
+-- (mirrors what a single local transaction used to do). The item's unit
+-- cost (purchase_price / purchase_quantity) is snapshotted into unit_cost
+-- at the moment of recording, so editing the item's price later never
+-- changes the cost of usage you already logged.
 create or replace function public.add_inventory_usage(
   p_item_id bigint, p_project_id bigint, p_date text, p_quantity numeric
 ) returns void
 language plpgsql
 security invoker
 as $$
+declare
+  v_price numeric;
+  v_qty numeric;
+  v_unit_cost numeric;
 begin
-  insert into public.inventory_usage (project_id, item_id, date, quantity)
-  values (p_project_id, p_item_id, p_date, p_quantity);
+  select purchase_price, purchase_quantity into v_price, v_qty
+  from public.inventory_items where id = p_item_id;
+
+  v_unit_cost := case when v_qty is null or v_qty <= 0 then 0 else v_price / v_qty end;
+
+  insert into public.inventory_usage (project_id, item_id, date, quantity, unit_cost)
+  values (p_project_id, p_item_id, p_date, p_quantity, v_unit_cost);
 
   update public.inventory_items
   set used_quantity = used_quantity + p_quantity
@@ -114,7 +177,161 @@ begin
 end;
 $$;
 
--- ---------- Row Level Security: everyone can only touch their own rows ----------
+-- Deletes all inventory usage recorded for one day AND gives the quantity
+-- back to each item's remaining stock (used_quantity), atomically. Used by
+-- "delete day" so removing a day's records doesn't leave inventory
+-- consumption/stock permanently wrong.
+create or replace function public.delete_inventory_usage_for_date(
+  p_project_id bigint, p_date text
+) returns void
+language plpgsql
+security invoker
+as $$
+begin
+  update public.inventory_items ii
+  set used_quantity = used_quantity - sub.total_qty
+  from (
+    select item_id, sum(quantity) as total_qty
+    from public.inventory_usage
+    where project_id = p_project_id and date = p_date
+    group by item_id
+  ) sub
+  where ii.id = sub.item_id;
+
+  delete from public.inventory_usage
+  where project_id = p_project_id and date = p_date;
+end;
+$$;
+
+-- Adds a new purchase batch to an inventory item atomically: increases the
+-- total purchased quantity and total purchase value by the given amounts
+-- (never overwrites them), so past recorded usage keeps its own locked-in
+-- price and only NEW usage prices at the resulting blended average.
+create or replace function public.restock_inventory_item(
+  p_item_id bigint, p_added_quantity numeric, p_added_price numeric
+) returns void
+language plpgsql
+security invoker
+as $$
+begin
+  update public.inventory_items
+  set purchase_quantity = purchase_quantity + p_added_quantity,
+      purchase_price = purchase_price + p_added_price
+  where id = p_item_id;
+end;
+$$;
+
+-- Upserts a cost-item sale for one day. If that cost item is linked to an
+-- inventory item, this ALSO derives the sale's unit cost from the
+-- inventory item's CURRENT price (locking it into cost_usage.unit_cost so
+-- a later price change never rewrites this day), and keeps a paired
+-- inventory_usage row in sync — inserting it, or adjusting it by the
+-- DELTA if this day's quantity is being edited (never double-counted).
+create or replace function public.upsert_linked_cost_usage(
+  p_project_id bigint, p_item_id bigint, p_date text, p_quantity numeric
+) returns void
+language plpgsql
+security invoker
+as $$
+declare
+  v_inv_item_id bigint;      -- currently-linked inventory item (may be null)
+  v_consumption numeric;
+  v_inv_price numeric;
+  v_inv_qty numeric;
+  v_inv_unit_cost numeric := null;
+  v_unit_cost numeric := null;
+  v_new_inv_qty numeric := 0;
+  v_cost_usage_id bigint;
+  v_old_inv_item_id bigint;  -- item_id on the existing derived row, if any
+  v_old_inv_qty numeric;
+begin
+  select linked_inventory_item_id, consumption_per_unit
+    into v_inv_item_id, v_consumption
+  from public.cost_items where id = p_item_id;
+
+  if v_inv_item_id is not null then
+    select purchase_price, purchase_quantity into v_inv_price, v_inv_qty
+    from public.inventory_items where id = v_inv_item_id;
+    v_inv_unit_cost := case when v_inv_qty is null or v_inv_qty <= 0
+      then 0 else v_inv_price / v_inv_qty end;
+    v_unit_cost := v_inv_unit_cost * coalesce(v_consumption, 1);
+    v_new_inv_qty := p_quantity * coalesce(v_consumption, 1);
+  end if;
+
+  insert into public.cost_usage (project_id, item_id, date, quantity, unit_cost)
+  values (p_project_id, p_item_id, p_date, p_quantity, v_unit_cost)
+  on conflict (project_id, item_id, date)
+  do update set quantity = excluded.quantity, unit_cost = excluded.unit_cost
+  returning id into v_cost_usage_id;
+
+  -- Find any previously-derived inventory usage row tied to this sale (uses
+  -- FOUND rather than "quantity = 0", so a prior row that happens to have
+  -- quantity 0 is still correctly treated as "exists").
+  select item_id, quantity into v_old_inv_item_id, v_old_inv_qty
+  from public.inventory_usage where source_cost_usage_id = v_cost_usage_id;
+  if not found then
+    v_old_inv_item_id := null;
+    v_old_inv_qty := 0;
+  end if;
+
+  -- If the item is no longer linked (or is now linked to a DIFFERENT
+  -- inventory item than before), reverse and remove the stale derived row
+  -- first so stock is never left out of sync.
+  if v_old_inv_item_id is not null and
+     (v_inv_item_id is null or v_old_inv_item_id <> v_inv_item_id) then
+    update public.inventory_items
+    set used_quantity = used_quantity - v_old_inv_qty
+    where id = v_old_inv_item_id;
+    delete from public.inventory_usage where source_cost_usage_id = v_cost_usage_id;
+    v_old_inv_item_id := null;
+    v_old_inv_qty := 0;
+  end if;
+
+  if v_inv_item_id is not null then
+    if v_old_inv_item_id is null then
+      insert into public.inventory_usage
+        (project_id, item_id, date, quantity, unit_cost, source_cost_usage_id)
+      values
+        (p_project_id, v_inv_item_id, p_date, v_new_inv_qty, v_inv_unit_cost, v_cost_usage_id);
+    else
+      update public.inventory_usage
+      set quantity = v_new_inv_qty, unit_cost = v_inv_unit_cost, date = p_date
+      where source_cost_usage_id = v_cost_usage_id;
+    end if;
+
+    update public.inventory_items
+    set used_quantity = used_quantity + (v_new_inv_qty - v_old_inv_qty)
+    where id = v_inv_item_id;
+  end if;
+end;
+$$;
+
+-- Deletes one cost-item sale row and, if it had a linked/derived inventory
+-- usage row, reverses that stock deduction and removes it too.
+create or replace function public.delete_linked_cost_usage(
+  p_cost_usage_id bigint
+) returns void
+language plpgsql
+security invoker
+as $$
+declare
+  v_inv_item_id bigint;
+  v_qty numeric;
+begin
+  select item_id, quantity into v_inv_item_id, v_qty
+  from public.inventory_usage where source_cost_usage_id = p_cost_usage_id;
+
+  if v_inv_item_id is not null then
+    update public.inventory_items
+    set used_quantity = used_quantity - v_qty
+    where id = v_inv_item_id;
+
+    delete from public.inventory_usage where source_cost_usage_id = p_cost_usage_id;
+  end if;
+
+  delete from public.cost_usage where id = p_cost_usage_id;
+end;
+$$;
 
 alter table public.projects enable row level security;
 alter table public.cost_items enable row level security;

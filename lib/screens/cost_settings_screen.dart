@@ -24,7 +24,9 @@ class CostItemsTab extends StatefulWidget {
 class CostItemsTabState extends State<CostItemsTab> {
   final _db = AppDatabase.instance;
   List<CostItem> _items = [];
+  List<CostItem> _archived = [];
   Map<int, CostEntry?> _latest = {};
+  Map<int, InventoryItem> _inventoryById = {};
   bool _loading = true;
 
   @override
@@ -35,15 +37,21 @@ class CostItemsTabState extends State<CostItemsTab> {
 
   Future<void> _load() async {
     final pid = widget.project.id!;
-    final items = await _db.getCostItems(pid);
+    final all = await _db.getCostItems(pid, includeArchived: true);
+    final active = all.where((i) => !i.archived).toList();
+    final archived = all.where((i) => i.archived).toList();
     final latest = <int, CostEntry?>{};
-    for (final it in items) {
-      latest[it.id!] = await _db.latestCostEntry(pid, it.id!);
+    for (final it in all) {
+      if (!it.isLinked) latest[it.id!] = await _db.latestCostEntry(pid, it.id!);
     }
+    final inventory =
+        await _db.getInventory(pid, includeArchived: true);
     if (!mounted) return;
     setState(() {
-      _items = items;
+      _items = active;
+      _archived = archived;
       _latest = latest;
+      _inventoryById = {for (final i in inventory) i.id!: i};
       _loading = false;
     });
   }
@@ -97,11 +105,16 @@ class CostItemsTabState extends State<CostItemsTab> {
 
   Future<void> _deleteItem(CostItem item) async {
     final t = L10n.of(context).t;
+    final messenger = ScaffoldMessenger.of(context);
+    final hasHistory = _latest[item.id] != null ||
+        await _itemHasAnyHistory(item.id!);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(t('deleteCostItem')),
-        content: Text(t('deleteCostItemConfirm')),
+        content: Text(hasHistory
+            ? t('itemArchivedNotice')
+            : t('confirmDeleteNoHistory')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -109,12 +122,93 @@ class CostItemsTabState extends State<CostItemsTab> {
           FilledButton(
               style: FilledButton.styleFrom(backgroundColor: AppColors.bad),
               onPressed: () => Navigator.pop(ctx, true),
-              child: Text(t('delete'))),
+              child: Text(hasHistory ? t('archived') : t('delete'))),
         ],
       ),
     );
     if (ok == true) {
-      await _db.deleteCostItem(item.id!);
+      final archived =
+          await _db.smartDeleteCostItem(widget.project.id!, item.id!);
+      messenger.showSnackBar(SnackBar(
+          content: Text(archived ? t('itemArchivedNotice') : t('delete'))));
+      _load();
+    }
+  }
+
+  Future<bool> _itemHasAnyHistory(int itemId) async {
+    // latestCostEntry already covers cost_history; also check usage.
+    final usage =
+        await _db.getCostUsage(widget.project.id!).then((all) => all
+            .where((u) => u.itemId == itemId)
+            .isNotEmpty);
+    return usage;
+  }
+
+  Future<void> _restoreItem(CostItem item) async {
+    await _db.unarchiveCostItem(item.id!);
+    _load();
+  }
+
+  Future<void> _unlink(CostItem item) async {
+    final t = L10n.of(context).t;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('unlinkFromInventory')),
+        content: Text(t('unlinkConfirm')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t('cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t('unlinkFromInventory'))),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _db.unlinkCostItem(item.id!);
+      _load();
+    }
+  }
+
+  Future<void> _editConsumptionRatio(CostItem item) async {
+    final t = L10n.of(context).t;
+    final messenger = ScaffoldMessenger.of(context);
+    final ratioCtl =
+        TextEditingController(text: fmtNum(item.consumptionPerUnit ?? 1));
+    final formKey = GlobalKey<FormState>();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('editConsumptionRatio')),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: ratioCtl,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(labelText: t('consumptionPerUnit')),
+            validator: (v) => validateNumber(ctx, v),
+            autofocus: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t('cancel'))),
+          FilledButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) Navigator.pop(ctx, true);
+              },
+              child: Text(t('save'))),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _db.updateCostItemLink(item.id!, item.linkedInventoryItemId,
+          parseNum(ratioCtl.text.replaceAll(',', '')));
+      messenger.showSnackBar(SnackBar(content: Text(t('ratioUpdated'))));
       _load();
     }
   }
@@ -134,42 +228,88 @@ class CostItemsTabState extends State<CostItemsTab> {
           ),
         ),
         const SizedBox(height: 16),
-        if (_items.isEmpty)
+        if (_items.isEmpty && _archived.isEmpty)
           EmptyState(
               icon: Icons.price_change_outlined, message: t('noCostItems'))
         else
           ..._items.map((it) {
             final latest = _latest[it.id];
+            final linkedInv =
+                it.isLinked ? _inventoryById[it.linkedInventoryItemId] : null;
+            final autoPrice = linkedInv == null
+                ? null
+                : linkedInv.unitCost * (it.consumptionPerUnit ?? 1);
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
-                leading: const Icon(Icons.local_drink_outlined),
+                leading: Icon(it.isLinked
+                    ? Icons.link
+                    : Icons.local_drink_outlined),
                 title: Text(it.name),
-                subtitle: Text(latest == null
-                    ? t('noCostSet')
-                    : '${t('currentCost')}: ${fmtMoney(context, latest.cost)} '
-                        '(${monthLabel(context, latest.month)})'),
+                subtitle: Text(it.isLinked
+                    ? '${t('priceAutoFromInventory')}'
+                        '${autoPrice != null ? ' — ${fmtMoney(context, autoPrice)}' : ''}'
+                    : (latest == null
+                        ? t('noCostSet')
+                        : '${t('currentCost')}: ${fmtMoney(context, latest.cost)} '
+                            '(${monthLabel(context, latest.month)})')),
                 trailing: PopupMenuButton<String>(
                   onSelected: (v) {
                     if (v == 'edit') _addOrEditItem(existing: it);
+                    if (v == 'editRatio') _editConsumptionRatio(it);
+                    if (v == 'unlink') _unlink(it);
                     if (v == 'delete') _deleteItem(it);
                   },
                   itemBuilder: (_) => [
                     PopupMenuItem(value: 'edit', child: Text(t('edit'))),
+                    if (it.isLinked)
+                      PopupMenuItem(
+                          value: 'editRatio',
+                          child: Text(t('editConsumptionRatio'))),
+                    if (it.isLinked)
+                      PopupMenuItem(
+                          value: 'unlink',
+                          child: Text(t('unlinkFromInventory'))),
                     PopupMenuItem(value: 'delete', child: Text(t('delete'))),
                   ],
                 ),
-                onTap: () async {
-                  await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => CostItemHistoryScreen(
-                              project: widget.project, item: it)));
-                  _load();
-                },
+                onTap: it.isLinked
+                    ? null
+                    : () async {
+                        await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => CostItemHistoryScreen(
+                                    project: widget.project, item: it)));
+                        _load();
+                      },
               ),
             );
           }),
+        if (_archived.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(t('archivedItems'),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          ..._archived.map((it) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                color: Theme.of(context).disabledColor.withOpacity(.06),
+                child: ListTile(
+                  leading: Icon(Icons.archive_outlined,
+                      color: Theme.of(context).hintColor),
+                  title: Text(it.name,
+                      style: TextStyle(color: Theme.of(context).hintColor)),
+                  subtitle: Text(t('archived')),
+                  trailing: TextButton(
+                    onPressed: () => _restoreItem(it),
+                    child: Text(t('restore')),
+                  ),
+                ),
+              )),
+        ],
       ],
     );
   }

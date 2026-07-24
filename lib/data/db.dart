@@ -71,26 +71,78 @@ class AppDatabase {
 
   // ---------------- Cost items ----------------
 
-  Future<List<CostItem>> getCostItems(int projectId) async {
-    final rows = await _c
-        .from('cost_items')
-        .select()
-        .eq('project_id', projectId)
-        .order('name');
+  Future<List<CostItem>> getCostItems(int projectId,
+      {bool includeArchived = false}) async {
+    var q = _c.from('cost_items').select().eq('project_id', projectId);
+    if (!includeArchived) q = q.eq('archived', false);
+    final rows = await q.order('name');
     return (rows as List).map((r) => CostItem.fromMap(r)).toList();
   }
 
   Future<int> insertCostItem(CostItem i) async {
     final row = await _c
         .from('cost_items')
-        .insert({'project_id': i.projectId, 'name': i.name})
+        .insert({
+          'project_id': i.projectId,
+          'name': i.name,
+          'linked_inventory_item_id': i.linkedInventoryItemId,
+          'consumption_per_unit': i.consumptionPerUnit,
+        })
         .select()
         .single();
     return row['id'] as int;
   }
 
-  Future<void> updateCostItem(CostItem i) async =>
-      _c.from('cost_items').update({'name': i.name}).eq('id', i.id as Object);
+  Future<void> updateCostItem(CostItem i) async => _c
+      .from('cost_items')
+      .update({'name': i.name}).eq('id', i.id as Object);
+
+  /// Updates only the inventory link (used_quantity conversion ratio),
+  /// leaving name/archived untouched.
+  Future<void> updateCostItemLink(
+      int itemId, int? linkedInventoryItemId, double? consumptionPerUnit) async {
+    await _c.from('cost_items').update({
+      'linked_inventory_item_id': linkedInventoryItemId,
+      'consumption_per_unit': consumptionPerUnit,
+    }).eq('id', itemId);
+  }
+
+  Future<void> unlinkCostItem(int itemId) async =>
+      updateCostItemLink(itemId, null, null);
+
+  Future<void> archiveCostItem(int id) async =>
+      _c.from('cost_items').update({'archived': true}).eq('id', id);
+
+  Future<void> unarchiveCostItem(int id) async =>
+      _c.from('cost_items').update({'archived': false}).eq('id', id);
+
+  /// Deletes the item outright ONLY if it has no cost history/usage at all
+  /// (so nothing is lost). If it has ever been used, archives it instead —
+  /// keeping it out of new-entry pickers while leaving every past report
+  /// untouched. Returns true if it was archived (not fully deleted).
+  Future<bool> smartDeleteCostItem(int projectId, int itemId) async {
+    final usage = await _c
+        .from('cost_usage')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('item_id', itemId)
+        .limit(1);
+    final history = await _c
+        .from('cost_history')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('item_id', itemId)
+        .limit(1);
+    final hasHistory =
+        (usage as List).isNotEmpty || (history as List).isNotEmpty;
+    if (hasHistory) {
+      await archiveCostItem(itemId);
+      return true;
+    } else {
+      await _c.from('cost_items').delete().eq('id', itemId);
+      return false;
+    }
+  }
 
   Future<void> deleteCostItem(int id) async =>
       _c.from('cost_items').delete().eq('id', id);
@@ -173,33 +225,39 @@ class AppDatabase {
     return (rows as List).map((r) => CostUsage.fromMap(r)).toList();
   }
 
+  /// Upserts a sale for [u.projectId]/[u.itemId]/[u.date]. If that cost
+  /// item is linked to an inventory item, this ALSO derives its cost from
+  /// the inventory item's current price and keeps inventory stock in sync
+  /// (see upsert_linked_cost_usage in supabase_schema.sql).
   Future<void> upsertCostUsage(CostUsage u) async {
-    await _c.from('cost_usage').upsert(
-      {
-        'project_id': u.projectId,
-        'item_id': u.itemId,
-        'date': u.date,
-        'quantity': u.quantity,
-      },
-      onConflict: 'project_id,item_id,date',
-    );
+    await _c.rpc('upsert_linked_cost_usage', params: {
+      'p_project_id': u.projectId,
+      'p_item_id': u.itemId,
+      'p_date': u.date,
+      'p_quantity': u.quantity,
+    });
   }
 
+  /// Deletes a sale row and reverses its linked inventory deduction, if any.
   Future<void> deleteCostUsage(int id) async =>
-      _c.from('cost_usage').delete().eq('id', id);
+      _c.rpc('delete_linked_cost_usage', params: {'p_cost_usage_id': id});
 
-  /// Total product cost for each day in [month] (quantity * that item's
-  /// unit cost for the month), summed across all items used that day.
+  /// Total product cost for each day in [month]: for items linked to
+  /// inventory, uses the cost LOCKED IN at time of sale (unit_cost);
+  /// otherwise falls back to that item's manually-set monthly cost.
   Future<Map<String, double>> productCostByDateForMonth(
       int projectId, String month) async {
     final usage = await getCostUsage(projectId, month: month);
     final costCache = <int, double>{};
     final result = <String, double>{};
     for (final u in usage) {
-      var cost = costCache[u.itemId];
-      if (cost == null) {
-        cost = await costForItemMonth(projectId, u.itemId, month);
-        costCache[u.itemId] = cost;
+      double cost;
+      if (u.unitCost != null) {
+        cost = u.unitCost!;
+      } else {
+        cost = costCache[u.itemId] ??
+            (costCache[u.itemId] =
+                await costForItemMonth(projectId, u.itemId, month));
       }
       result[u.date] = (result[u.date] ?? 0) + u.quantity * cost;
     }
@@ -243,13 +301,18 @@ class AppDatabase {
       _c.from('daily_records').delete().eq('id', id);
 
   /// Deletes EVERYTHING recorded for one day: the sales record, all cost
-  /// item usage, and all daily expenses logged on that date. Irreversible.
+  /// item usage, all daily expenses, AND all inventory usage (returning the
+  /// consumed quantity back to stock). Irreversible.
   Future<void> deleteDay(int projectId, String date) async {
     await _c
         .from('cost_usage')
         .delete()
         .eq('project_id', projectId)
         .eq('date', date);
+    await _c.rpc('delete_inventory_usage_for_date', params: {
+      'p_project_id': projectId,
+      'p_date': date,
+    });
     await _c
         .from('daily_expenses')
         .delete()
@@ -305,12 +368,11 @@ class AppDatabase {
 
   // ---------------- Inventory ----------------
 
-  Future<List<InventoryItem>> getInventory(int projectId) async {
-    final rows = await _c
-        .from('inventory_items')
-        .select()
-        .eq('project_id', projectId)
-        .order('name');
+  Future<List<InventoryItem>> getInventory(int projectId,
+      {bool includeArchived = false}) async {
+    var q = _c.from('inventory_items').select().eq('project_id', projectId);
+    if (!includeArchived) q = q.eq('archived', false);
+    final rows = await q.order('name');
     return (rows as List).map((r) => InventoryItem.fromMap(r)).toList();
   }
 
@@ -325,6 +387,8 @@ class AppDatabase {
           'purchase_quantity': i.purchaseQuantity,
           'purchase_price': i.purchasePrice,
           'used_quantity': i.usedQuantity,
+          'unit_type': i.unitType,
+          'units_per_container': i.unitsPerContainer,
         })
         .select()
         .single();
@@ -339,7 +403,57 @@ class AppDatabase {
       'purchase_quantity': i.purchaseQuantity,
       'purchase_price': i.purchasePrice,
       'used_quantity': i.usedQuantity,
+      'unit_type': i.unitType,
+      'units_per_container': i.unitsPerContainer,
     }).eq('id', i.id as Object);
+  }
+
+  Future<void> archiveInventoryItem(int id) async =>
+      _c.from('inventory_items').update({'archived': true}).eq('id', id);
+
+  /// Adds a new purchase batch on top of the item's existing totals
+  /// (never overwrites them) — see restock_inventory_item in
+  /// supabase_schema.sql. Past recorded usage keeps its own locked-in
+  /// price; only future usage prices at the resulting blended average.
+  Future<void> restockInventoryItem(
+      int itemId, double addedQuantity, double addedPrice) async {
+    await _c.rpc('restock_inventory_item', params: {
+      'p_item_id': itemId,
+      'p_added_quantity': addedQuantity,
+      'p_added_price': addedPrice,
+    });
+  }
+
+  Future<void> unarchiveInventoryItem(int id) async =>
+      _c.from('inventory_items').update({'archived': false}).eq('id', id);
+
+  /// Same idea as [smartDeleteCostItem]: only hard-deletes an inventory
+  /// item if it was never actually used AND isn't currently linked to a
+  /// "cost of products used" item; otherwise archives it so past
+  /// consumption/reports (and the link itself) stay intact. Returns true
+  /// if archived.
+  Future<bool> smartDeleteInventoryItem(int projectId, int itemId) async {
+    final usage = await _c
+        .from('inventory_usage')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('item_id', itemId)
+        .limit(1);
+    final linkedCostItems = await _c
+        .from('cost_items')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('linked_inventory_item_id', itemId)
+        .limit(1);
+    final hasHistory =
+        (usage as List).isNotEmpty || (linkedCostItems as List).isNotEmpty;
+    if (hasHistory) {
+      await archiveInventoryItem(itemId);
+      return true;
+    } else {
+      await _c.from('inventory_items').delete().eq('id', itemId);
+      return false;
+    }
   }
 
   Future<void> deleteInventoryItem(int id) async =>
@@ -356,14 +470,21 @@ class AppDatabase {
     });
   }
 
-  /// Consumption cost for a month = sum(usage.qty * item unit cost).
-  Future<double> inventoryConsumptionForMonth(
-      int projectId, String month) async {
-    final usage = await _c
-        .from('inventory_usage')
-        .select('item_id, quantity')
-        .eq('project_id', projectId)
-        .like('date', '$month%');
+  /// Convenience wrapper for the "Used up completely" button: records a
+  /// usage entry equal to whatever is currently remaining, zeroing stock.
+  Future<void> markInventoryFullyUsed(InventoryItem item, String date) async {
+    if (item.remaining <= 0) return;
+    await addInventoryUsage(InventoryUsage(
+      projectId: item.projectId,
+      itemId: item.id!,
+      date: date,
+      quantity: item.remaining,
+    ));
+  }
+
+  /// Falls back to items' CURRENT price only for legacy usage rows recorded
+  /// before unit_cost was tracked (unit_cost is null on those rows).
+  Future<Map<int, double>> _currentInventoryUnitCosts(int projectId) async {
     final items = await _c
         .from('inventory_items')
         .select('id, purchase_price, purchase_quantity')
@@ -374,9 +495,31 @@ class AppDatabase {
       final price = (it['purchase_price'] as num).toDouble();
       unitCost[it['id'] as int] = qty <= 0 ? 0 : price / qty;
     }
+    return unitCost;
+  }
+
+  /// Consumption cost for a month = sum(usage.qty * the unit cost that was
+  /// LOCKED IN when that usage was recorded) — so changing an item's price
+  /// today never rewrites the cost of a day you already logged.
+  Future<double> inventoryConsumptionForMonth(
+      int projectId, String month) async {
+    final usage = await _c
+        .from('inventory_usage')
+        .select('item_id, quantity, unit_cost')
+        .eq('project_id', projectId)
+        .like('date', '$month%');
+
+    Map<int, double>? legacyCosts; // fetched only if needed
     double total = 0;
     for (final u in (usage as List)) {
-      final cost = unitCost[u['item_id'] as int] ?? 0;
+      final locked = u['unit_cost'];
+      double cost;
+      if (locked != null) {
+        cost = (locked as num).toDouble();
+      } else {
+        legacyCosts ??= await _currentInventoryUnitCosts(projectId);
+        cost = legacyCosts[u['item_id'] as int] ?? 0;
+      }
       total += (u['quantity'] as num).toDouble() * cost;
     }
     return total;
@@ -401,6 +544,7 @@ class AppDatabase {
           'name': e.name,
           'monthly_amount': e.monthlyAmount,
           'start_month': e.startMonth,
+          'end_month': e.endMonth,
           'notes': e.notes,
         })
         .select()
@@ -413,6 +557,7 @@ class AppDatabase {
       'name': e.name,
       'monthly_amount': e.monthlyAmount,
       'start_month': e.startMonth,
+      'end_month': e.endMonth,
       'notes': e.notes,
     }).eq('id', e.id as Object);
   }
@@ -420,12 +565,17 @@ class AppDatabase {
   Future<void> deleteFixedExpense(int id) async =>
       _c.from('fixed_expenses').delete().eq('id', id);
 
+  /// A fixed expense applies to [month] if it had already started
+  /// (start_month <= month) and hasn't ended yet (end_month is null or is
+  /// on/after month). Ending an expense (instead of deleting it) is what
+  /// keeps every past month's report exactly as it was.
   Future<double> fixedExpensesForMonth(int projectId, String month) async {
     final rows = await _c
         .from('fixed_expenses')
         .select('monthly_amount')
         .eq('project_id', projectId)
-        .lte('start_month', month);
+        .lte('start_month', month)
+        .or('end_month.is.null,end_month.gte.$month');
     return (rows as List).fold<double>(
         0.0, (s, r) => s + (r['monthly_amount'] as num).toDouble());
   }
@@ -541,49 +691,52 @@ class AppDatabase {
       int projectId, String startDate, String endDate) async {
     final usage = await _c
         .from('inventory_usage')
-        .select('item_id, quantity')
+        .select('item_id, quantity, unit_cost')
         .eq('project_id', projectId)
         .gte('date', startDate)
         .lte('date', endDate);
-    final items = await _c
-        .from('inventory_items')
-        .select('id, purchase_price, purchase_quantity')
-        .eq('project_id', projectId);
-    final unitCost = <int, double>{};
-    for (final it in (items as List)) {
-      final qty = (it['purchase_quantity'] as num).toDouble();
-      final price = (it['purchase_price'] as num).toDouble();
-      unitCost[it['id'] as int] = qty <= 0 ? 0 : price / qty;
-    }
+
+    Map<int, double>? legacyCosts;
     double total = 0;
     for (final u in (usage as List)) {
-      final cost = unitCost[u['item_id'] as int] ?? 0;
+      final locked = u['unit_cost'];
+      double cost;
+      if (locked != null) {
+        cost = (locked as num).toDouble();
+      } else {
+        legacyCosts ??= await _currentInventoryUnitCosts(projectId);
+        cost = legacyCosts[u['item_id'] as int] ?? 0;
+      }
       total += (u['quantity'] as num).toDouble() * cost;
     }
     return total;
   }
 
-  /// Product (operating-cost item) cost across a date range: each usage row
-  /// is priced with that item's cost for the month it falls in.
+  /// Product (operating-cost item) cost across a date range: for items
+  /// linked to inventory, uses each sale's LOCKED-IN cost; otherwise falls
+  /// back to that item's monthly cost for the month the sale falls in.
   Future<double> productCostForRange(
       int projectId, String startDate, String endDate) async {
     final rows = await _c
         .from('cost_usage')
-        .select('item_id, date, quantity')
+        .select('item_id, date, quantity, unit_cost')
         .eq('project_id', projectId)
         .gte('date', startDate)
         .lte('date', endDate);
     final costCache = <String, double>{}; // '$itemId-$month' -> cost
     double total = 0;
     for (final u in (rows as List)) {
-      final itemId = u['item_id'] as int;
-      final date = u['date'] as String;
-      final month = date.substring(0, 7);
-      final key = '$itemId-$month';
-      var cost = costCache[key];
-      if (cost == null) {
-        cost = await costForItemMonth(projectId, itemId, month);
-        costCache[key] = cost;
+      final locked = u['unit_cost'];
+      double cost;
+      if (locked != null) {
+        cost = (locked as num).toDouble();
+      } else {
+        final itemId = u['item_id'] as int;
+        final date = u['date'] as String;
+        final month = date.substring(0, 7);
+        final key = '$itemId-$month';
+        cost = costCache[key] ??
+            (costCache[key] = await costForItemMonth(projectId, itemId, month));
       }
       total += (u['quantity'] as num).toDouble() * cost;
     }
@@ -597,6 +750,61 @@ class AppDatabase {
     final totals = await Future.wait(_monthsBetween(startDate, endDate)
         .map((month) => fixedExpensesForMonth(projectId, month)));
     return totals.fold<double>(0.0, (s, v) => s + v);
+  }
+
+  /// Per-item inventory breakdown for the printed report: quantity
+  /// consumed + its cost during [startDate]..[endDate], plus how much is
+  /// left right now. Archived items are included if they were consumed
+  /// during the period (so old reports stay complete).
+  Future<List<InventoryBreakdownRow>> inventoryBreakdownForRange(
+      int projectId, String startDate, String endDate) async {
+    final usage = await _c
+        .from('inventory_usage')
+        .select('item_id, quantity, unit_cost')
+        .eq('project_id', projectId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+
+    final consumedQty = <int, double>{};
+    final consumedCost = <int, double>{};
+    Map<int, double>? legacyCosts;
+    for (final u in (usage as List)) {
+      final itemId = u['item_id'] as int;
+      final qty = (u['quantity'] as num).toDouble();
+      final locked = u['unit_cost'];
+      double cost;
+      if (locked != null) {
+        cost = (locked as num).toDouble();
+      } else {
+        legacyCosts ??= await _currentInventoryUnitCosts(projectId);
+        cost = legacyCosts[itemId] ?? 0;
+      }
+      consumedQty[itemId] = (consumedQty[itemId] ?? 0) + qty;
+      consumedCost[itemId] = (consumedCost[itemId] ?? 0) + qty * cost;
+    }
+
+    if (consumedQty.isEmpty) return [];
+
+    final items = await _c
+        .from('inventory_items')
+        .select('id, name, unit, purchase_quantity, used_quantity')
+        .eq('project_id', projectId)
+        .inFilter('id', consumedQty.keys.toList());
+
+    return (items as List).map((it) {
+      final id = it['id'] as int;
+      final purchaseQty = (it['purchase_quantity'] as num).toDouble();
+      final usedQty = (it['used_quantity'] as num).toDouble();
+      final remaining = (purchaseQty - usedQty).clamp(0, double.infinity);
+      return InventoryBreakdownRow(
+        name: it['name'] as String,
+        unit: (it['unit'] ?? '') as String,
+        consumedQty: consumedQty[id] ?? 0,
+        cost: consumedCost[id] ?? 0,
+        remainingNow: remaining.toDouble(),
+      );
+    }).toList()
+      ..sort((a, b) => b.cost.compareTo(a.cost));
   }
 
   Future<PeriodReport> rangeReport(
